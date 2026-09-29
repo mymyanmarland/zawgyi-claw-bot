@@ -6,6 +6,9 @@ const { encrypt, maskKey, decrypt } = require('./crypto');
 const { chat, probeApi } = require('./agent');
 const { saveTelegramPhoto } = require('./photos');
 const { saveTelegramAudio, transcribeAudio, whisperAvailable } = require('./audio');
+const { saveTelegramDocument, extractText, supportedExt } = require('./documents');
+const { validateBaseUrl } = require('./ssrf');
+const { createOutboxFile } = require('./tools');
 const config = require('./config');
 
 const NOAPI_MSG = `🔌 **Model API မချိတ်ရသေးပါ**
@@ -83,6 +86,22 @@ function isOwner(tgId) {
   return config.ownerId && String(tgId) === String(config.ownerId);
 }
 
+// Group-chat helpers: in groups the bot only answers when addressed
+// (mention or reply to its message). Sensitive commands are private-only.
+function isPrivate(ctx) {
+  return !ctx.chat || ctx.chat.type === 'private';
+}
+function addressedInGroup(ctx) {
+  if (isPrivate(ctx)) return true;
+  const username = ctx.botInfo && ctx.botInfo.username;
+  const text = ctx.message.text || ctx.message.caption || '';
+  if (username && text.includes('@' + username)) return true;
+  const r = ctx.message.reply_to_message;
+  if (r && r.from && username && r.from.username === username) return true;
+  return false;
+}
+const PRIVATE_ONLY_MSG = '🔒 ဒီ command ကို bot နဲ့ private chat မှာပဲ သုံးပါ 🙏 (API key လုံခြုံရေးအတွက်)';
+
 function createBot() {
   const bot = new Telegraf(config.botToken);
 
@@ -108,8 +127,9 @@ function createBot() {
       `✅ /testapi — API စမ်းသပ်ရန်\n` +
       `🔍 /myapi — ချိတ်ထားတာ ကြည့်ရန်\n` +
       `🗑 /removeapi — API ဖျက်ရန်\n\n` +
-      `💬 စာပို့လိုက်ရုံနဲ့ စကားပြောလို့ရတယ်\n` +
+      `💬 စာပို့လိုက်ရုံနဲ့ စကားပြောလို့ရတယ် (စာလုံးတစ်လုံးချင်း ပေါ်လာမယ် ✨)\n` +
       `🖼 ပုံပို့လိုက်ရင် ပုံကို ကြည့်ပြီး ဖြေပေးနိုင်တယ်\n` +
+      `📄 PDF / Word / text ဖိုင်ပို့ရင် ဖတ်ပြီး ရှင်းပြပေးတယ်\n` +
       `🎙️ voice message ပို့ရင် နားထောင်ပြီး ဖြေပေးတယ်\n` +
       `📎 file လုပ်ခိုင်းရင် attachment အဖြစ် တိုက်ရိုက်ပို့ပေးတယ်\n` +
       `🆕 /new — စကားဝိုင်း အသစ်စ\n` +
@@ -119,20 +139,30 @@ function createBot() {
       `⏰ /remind <အချိန်> <စာ> — သတိပေးချက်\n` +
       `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်\n` +
       `🔁 /cron <expression> <စာ> — ထပ်တလဲလဲ သတိပေးချက်\n` +
-      `📋 /crons — cron များ ကြည့်ရန်\n` +
-      `🗑 /uncron <id> — cron ဖျက်ရန်`
+      `📰 /briefing <expression> <အကြောင်း> — AI သတင်းအကျဉ်း\n` +
+      `📋 /crons — cron/briefing များ ကြည့်ရန်\n` +
+      `🗑 /uncron <id> — cron ဖျက်ရန်\n` +
+      `📤 /export — စကားဝိုင်း မှတ်တမ်း ထုတ်ယူရန်\n` +
+      `📊 /usage — ဒီနေ့ အသုံးပြုမှု ကြည့်ရန်`
     );
   });
 
   bot.command('setapi', async (ctx) => {
+    if (!isPrivate(ctx)) return ctx.reply(PRIVATE_ONLY_MSG);
     const tgId = String(ctx.from.id);
     const parts = ctx.message.text.split(/\s+/);
+    // Delete the command message ASAP: it contains the raw API key.
+    const wipeCmd = () => ctx.deleteMessage(ctx.message.message_id).catch(() => {});
     if (parts.length < 4) {
-      return ctx.reply('သုံးပုံ: /setapi <base_url> <api_key> <model>\nဥပမာ: /setapi https://api.openai.com/v1 sk-xxxx gpt-4o-mini');
+      await wipeCmd();
+      return ctx.reply('သုံးပုံ: /setapi <base_url> <api_key> <model>\nဥပမာ: /setapi https://api.openai.com/v1 sk-xxxx gpt-4o-mini\n\n⚠️ key ပါတဲ့ command message ကို လုံခြုံရေးအတွက် ဖျက်လိုက်ပြီ။');
     }
     const [, baseUrl, apiKey, ...modelParts] = parts;
     const model = modelParts.join(' ');
-    if (!/^https?:\/\//.test(baseUrl)) return ctx.reply('❌ base_url က http(s):// နဲ့ စရမယ်။');
+    if (!/^https?:\/\//.test(baseUrl)) { await wipeCmd(); return ctx.reply('❌ base_url က http(s):// နဲ့ စရမယ်။'); }
+    const ssrfErr = await validateBaseUrl(baseUrl);
+    if (ssrfErr) { await wipeCmd(); return ctx.reply(`❌ URL မလုံခြုံပါ: ${ssrfErr}`); }
+    await wipeCmd(); // key must not stay in chat history
     try { await ctx.sendChatAction('typing'); } catch (e) {}
     try {
       await probeApi(baseUrl, apiKey, model);
@@ -144,6 +174,7 @@ function createBot() {
   });
 
   bot.command('testapi', async (ctx) => {
+    if (!isPrivate(ctx)) return ctx.reply(PRIVATE_ONLY_MSG);
     const tgId = String(ctx.from.id);
     const cfg = db.getApiConfig(tgId);
     if (!cfg) return replyLong(ctx, NOAPI_MSG);
@@ -158,6 +189,7 @@ function createBot() {
   });
 
   bot.command('myapi', async (ctx) => {
+    if (!isPrivate(ctx)) return ctx.reply(PRIVATE_ONLY_MSG);
     const cfg = db.getApiConfig(String(ctx.from.id));
     if (!cfg) return replyLong(ctx, NOAPI_MSG);
     const key = decrypt(cfg.api_key_enc, config.masterKey);
@@ -165,6 +197,7 @@ function createBot() {
   });
 
   bot.command('removeapi', async (ctx) => {
+    if (!isPrivate(ctx)) return ctx.reply(PRIVATE_ONLY_MSG);
     db.deleteApiConfig(String(ctx.from.id));
     await ctx.reply('🗑 API config ဖျက်ပြီးပြီ။ /setapi နဲ့ အသစ်ချိတ်နိုင်တယ်။');
   });
@@ -251,8 +284,8 @@ function createBot() {
   bot.command('crons', async (ctx) => {
     const list = db.listCronJobs(String(ctx.from.id));
     if (!list.length) return replyLong(ctx, '🔁 cron job မရှိသေးပါ။\n\n' + CRON_HELP);
-    await ctx.reply('🔁 **ထပ်တလဲလဲ သတိပေးချက်များ:**\n' +
-      list.map(j => `[${j.id}] ${j.text}\n      🕐 ${cronjobs.humanize(j.expr)} \`${j.expr}\``).join('\n'));
+    await ctx.reply('🔁 **ထပ်တလဲလဲ အလုပ်များ:**\n' +
+      list.map(j => `[${j.id}] ${j.kind === 'briefing' ? '📰' : '🔁'} ${j.text}\n      🕐 ${cronjobs.humanize(j.expr)} \`${j.expr}\``).join('\n'));
   });
 
   bot.command('uncron', async (ctx) => {
@@ -261,6 +294,63 @@ function createBot() {
     if (!/^\d+$/.test(arg)) return ctx.reply('သုံးပုံ: /uncron <id>\n/crons နဲ့ id ကြည့်ပါ။');
     const ok = cronjobs.removeJob(tgId, parseInt(arg));
     await ctx.reply(ok ? `🗑 [${arg}] ဖျက်ပြီးပြီ။` : 'မတွေ့ပါ။ /crons နဲ့ စစ်ပါ။');
+  });
+
+  const BRIEFING_HELP = `📰 **AI သတင်းအကျဉ်း (Briefing)**
+
+သုံးပုံ: /briefing <expression> <အကြောင်းအရာ>
+
+AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှာပြီး အကျဉ်းရေးပေးမယ်။
+
+ဥပမာ:
+/briefing 0 7 * * * မြန်မာ့စီးပွားရေး သတင်း
+/briefing 0 8 * * 1 နည်းပညာ သတင်းများ
+
+/crons နဲ့ ကြည့်နိုင်၊ /uncron <id> နဲ့ ဖျက်နိုင်တယ်။`;
+
+  bot.command('briefing', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    const rest = ctx.message.text.replace(/^\/briefing\s+/, '').trim();
+    const m = rest.match(/^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+([\s\S]+)$/);
+    if (!m) return replyLong(ctx, BRIEFING_HELP);
+    const [, expr, topic] = m;
+    const r = cronjobs.addJob(tgId, expr, `📰 ${topic.trim()}`, 'briefing', topic.trim());
+    if (r.error === 'invalid') return ctx.reply('❌ expression မှားနေတယ်။\n\n' + BRIEFING_HELP);
+    if (r.error === 'limit') return ctx.reply(`❌ cron job ${cronjobs.MAX_PER_USER} ခု ပြည့်နေပြီ။ /uncron နဲ့ အဟောင်းဖျက်ပါ။`);
+    if (r.error === 'notext') return ctx.reply('❌ အကြောင်းအရာ ထည့်ပါ။');
+    await ctx.reply(`📰 ဖန်တီးပြီးပြီ (id ${r.id}):\n📝 ${topic.trim()}\n🕐 ${cronjobs.humanize(expr)}\n\n/crons နဲ့ ကြည့်နိုင်တယ်။`);
+  });
+
+  bot.command('export', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    const msgs = db.getAllMessages(tgId, 200);
+    if (!msgs.length) return ctx.reply('📤 export လုပ်စရာ စကားဝိုင်း မရှိသေးပါ။');
+    const when = new Date().toLocaleString('my-MM', { timeZone: 'Asia/Yangon' });
+    const lines = [`# 🧙‍♂️ Zaw Gyi — စကားဝိုင်း မှတ်တမ်း`, `_${when}_\n`];
+    for (const m of msgs) {
+      const who = m.role === 'user' ? '🧑 မင်း' : '🧙‍♂️ ဇော်ဂျီ';
+      lines.push(`## ${who}\n${m.content}`);
+    }
+    const r = createOutboxFile(tgId, `zawgyi-chat-${new Date().toISOString().slice(0, 10)}.md`, lines.join('\n\n'));
+    if (r.error) return ctx.reply('📤 export မရဘူး 😅');
+    try {
+      await ctx.replyWithDocument({ source: r.path, filename: r.name }, { caption: '📤 စကားဝိုင်း မှတ်တမ်း' });
+    } catch (e) {
+      await ctx.replyWithDocument({ source: r.path, filename: r.name });
+    }
+  });
+
+  bot.command('usage', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    const t = db.getTokenUsage(tgId);
+    const msgs = db.getUsage(tgId);
+    const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+    await ctx.reply(
+      `📊 **ဒီနေ့ အသုံးပြုမှု**\n\n` +
+      `💬 Messages: ${msgs} / ${config.dailyLimit}\n` +
+      `🔤 Tokens: ${fmt(t.total_tokens)} (in ${fmt(t.prompt_tokens)} / out ${fmt(t.completion_tokens)})\n` +
+      `🤖 Model calls: ${t.calls}`
+    );
   });
 
   // --- admin ---
@@ -284,6 +374,95 @@ function createBot() {
   });
 
   // --- chat ---
+  // Streaming renderer: progressive message edits while tokens arrive.
+  const STREAM_MAX = 3900; // Telegram hard cap is 4096
+  const STREAM_EDIT_MS = 1200; // min ms between edits (rate-limit friendly)
+  function createStreamRenderer(ctx) {
+    const chatId = ctx.chat.id;
+    let chain = Promise.resolve();
+    let firstId = null;
+    let curId = null;
+    const extraIds = [];
+    let buf = '';
+    let lastEdit = 0;
+    let closed = false;
+
+    const editPlain = (id, text) =>
+      ctx.telegram.editMessageText(chatId, id, undefined, text).catch(() => {});
+
+    async function ensureMsg() {
+      if (!curId) {
+        const m = await ctx.reply('🧙‍♂️ စဉ်းစားနေတယ်...');
+        curId = m.message_id;
+        if (!firstId) firstId = curId;
+      }
+    }
+
+    function push(tok) {
+      if (closed || !tok) return;
+      chain = chain.then(async () => {
+        if (closed) return;
+        await ensureMsg();
+        if (buf.length + tok.length > STREAM_MAX) {
+          await editPlain(curId, buf); // finalize without cursor
+          extraIds.push(curId);
+          const m = await ctx.reply('🧙‍♂️ ဆက်ရေးနေတယ်...');
+          curId = m.message_id;
+          buf = '';
+        }
+        buf += tok;
+        const now = Date.now();
+        if (now - lastEdit >= STREAM_EDIT_MS) {
+          lastEdit = now;
+          await editPlain(curId, buf + ' ▍');
+        }
+      }).catch(() => {});
+    }
+
+    async function renderFinal(id, text) {
+      try {
+        await ctx.telegram.editMessageText(chatId, id, undefined, text, { parse_mode: 'Markdown' });
+      } catch (e) {
+        await editPlain(id, text); // Markdown failed (unclosed formatting) -> plain
+      }
+    }
+
+    async function finish(finalText) {
+      closed = true;
+      await chain;
+      const text = finalText || buf;
+      if (!firstId) return replyLong(ctx, text || '...'); // nothing streamed
+      const parts = splitLong(text);
+      await renderFinal(firstId, parts[0]);
+      for (let i = 1; i < parts.length; i++) {
+        await replyLong(ctx, parts[i]);
+      }
+      for (const id of extraIds) {
+        await ctx.telegram.deleteMessage(chatId, id).catch(() => {});
+      }
+    }
+
+    async function cancel() {
+      closed = true;
+      await chain;
+      if (firstId) {
+        if (!buf) await ctx.telegram.deleteMessage(chatId, firstId).catch(() => {});
+        else await editPlain(firstId, buf);
+      }
+    }
+
+    async function fail() {
+      closed = true;
+      await chain;
+      if (firstId) {
+        if (!buf) await ctx.telegram.deleteMessage(chatId, firstId).catch(() => {});
+        else await editPlain(firstId, buf + '\n\n😵 တစ်ခုခု မှားသွားတယ်။');
+      }
+    }
+
+    return { push, finish, cancel, fail };
+  }
+
   async function handleChat(ctx, text, photoFile) {
     const tgId = String(ctx.from.id);
     const u = ctx.from;
@@ -295,19 +474,19 @@ function createBot() {
     }
 
     try { await ctx.sendChatAction('typing'); } catch (e) {}
-    const typing = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
+    const renderer = createStreamRenderer(ctx);
     try {
-      const result = await chat(tgId, text, photoFile);
-      clearInterval(typing);
-      if (result.error === 'noapi') return replyLong(ctx, NOAPI_MSG);
+      const result = await chat(tgId, text, photoFile, (tok) => renderer.push(tok));
+      if (result.error === 'noapi') { await renderer.cancel(); return replyLong(ctx, NOAPI_MSG); }
       if (result.error === 'novision') {
+        await renderer.cancel();
         return ctx.reply(
           '😅 ဒီ model က ပုံမဖတ်နိုင်ဘူး။\n\n' +
           'Vision ရတဲ့ model သုံးပါ — ဥပမာ:\n' +
           '/setapi <url> <key> claude-sonnet-5'
         );
       }
-      await replyLong(ctx, result.text);
+      await renderer.finish(result.text);
       // agent-created file attachments -> send as Telegram documents
       if (result.files && result.files.length) {
         for (const f of result.files) {
@@ -320,7 +499,7 @@ function createBot() {
         }
       }
     } catch (e) {
-      clearInterval(typing);
+      await renderer.fail();
       console.error('chat error:', e.message);
       const em = e.message || '';
       if (/abort|timeout/i.test(em)) {
@@ -340,12 +519,14 @@ function createBot() {
   }
 
   bot.on('text', async (ctx) => {
+    if (!addressedInGroup(ctx)) return;
     await handleChat(ctx, ctx.message.text, null);
   });
 
   // --- photos: user sends an image, bot "sees" it via a vision model ---
   async function handleIncomingImage(ctx, fileId) {
     const tgId = String(ctx.from.id);
+    if (!addressedInGroup(ctx)) return;
     if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
     if (db.getUsage(tgId) >= config.dailyLimit) {
       return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
@@ -371,15 +552,53 @@ function createBot() {
     await handleIncomingImage(ctx, best.file_id);
   });
 
+  // --- documents: PDF / Word / text files -> extract text, chat on it ---
+  async function handleIncomingDocument(ctx, doc) {
+    const tgId = String(ctx.from.id);
+    if (!addressedInGroup(ctx)) return;
+    if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
+    if (db.getUsage(tgId) >= config.dailyLimit) {
+      return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
+    }
+    if (!supportedExt(doc.file_name)) {
+      return ctx.reply('📄 ဒီဖိုင်အမျိုးအစား မဖတ်နိုင်သေးဘူး 😅\nရတာတွေ: PDF, Word (.docx), txt, md, csv, json');
+    }
+    let statusMsg = null;
+    try { statusMsg = await ctx.reply('📄 ဖိုင်ဖတ်နေပါတယ်၊ ခဏစောင့်...'); } catch (e) {}
+    try {
+      const file = await saveTelegramDocument(config.botToken, config.dataDir, tgId, doc);
+      const { text, truncated } = await extractText(file);
+      if (statusMsg) await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
+      if (!text) return ctx.reply('📄 ဖိုင်ထဲမှာ စာသားမတွေ့ဘူး 😅');
+      const caption = (ctx.message.caption || '').trim();
+      const prompt =
+        `📄 [${file.name}] ဖိုင်ထဲက စာသား:\n"""\n${text}\n"""` +
+        (truncated ? '\n(စာရှည်လို့ အစပိုင်းပဲ ဖတ်ထားတယ်)' : '') +
+        (caption ? `\n\nအသုံးပြုသူရဲ့ မေးခွန်း: ${caption}` : '\n\nအထက်ပါဖိုင်ကို ရှင်းပြပေးပါ 🙏');
+      await handleChat(ctx, prompt, null);
+    } catch (e) {
+      if (statusMsg) await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
+      console.error('document failed:', e.message);
+      await ctx.reply(e.message === 'too_big'
+        ? '📄 ဖိုင်အရမ်းကြီးနေတယ် (10MB အထိပဲ ရတယ်) 😅'
+        : '😵 ဖိုင်ဖတ်မရဘူး။ ထပ်စမ်းကြည့်ပါ။');
+    }
+  }
+
   bot.on('document', async (ctx) => {
     const doc = ctx.message.document;
-    if (!doc || !(doc.mime_type || '').startsWith('image/')) return; // only image files
-    await handleIncomingImage(ctx, doc.file_id);
+    if (!doc) return;
+    if ((doc.mime_type || '').startsWith('image/')) {
+      if (!addressedInGroup(ctx)) return;
+      return handleIncomingImage(ctx, doc.file_id);
+    }
+    await handleIncomingDocument(ctx, doc);
   });
 
   // --- voice: transcribe locally, then chat on the transcript ---
   async function handleIncomingVoice(ctx, fileId) {
     const tgId = String(ctx.from.id);
+    if (!addressedInGroup(ctx)) return;
     if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
     if (db.getUsage(tgId) >= config.dailyLimit) {
       return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
@@ -430,8 +649,11 @@ function createBot() {
     { command: 'remind', description: 'သတိပေးချက် မှတ်ရန်' },
     { command: 'reminders', description: 'သတိပေးချက်များ ကြည့်ရန်' },
     { command: 'cron', description: 'ထပ်တလဲလဲ သတိပေးချက် ဖန်တီးရန်' },
-    { command: 'crons', description: 'cron စာရင်း ကြည့်ရန်' },
+    { command: 'briefing', description: 'AI သတင်းအကျဉ်း ဖန်တီးရန်' },
+    { command: 'crons', description: 'cron/briefing စာရင်း ကြည့်ရန်' },
     { command: 'uncron', description: 'cron ဖျက်ရန်' },
+    { command: 'export', description: 'စကားဝိုင်း မှတ်တမ်း ထုတ်ယူရန်' },
+    { command: 'usage', description: 'ဒီနေ့ အသုံးပြုမှု ကြည့်ရန်' },
     { command: 'remember', description: 'အချက် မှတ်ထားရန်' },
     { command: 'memory', description: 'မှတ်ထားတာများ ကြည့်ရန်' },
     { command: 'forget', description: 'မှတ်ထားတာ ဖျက်ရန်' },

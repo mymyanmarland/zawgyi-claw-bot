@@ -239,4 +239,4 @@ async function runTool(name, args, tgId) {
   }
 }
 
-module.exports = { toolDefs, runTool, MAX_FILES_PER_TURN };
+module.exports = { toolDefs, runTool, MAX_FILES_PER_TURN, createOutboxFile };

@@ -59,9 +59,21 @@ function init(dataDir) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_cron_user ON cron_jobs(tg_id);
+    CREATE TABLE IF NOT EXISTS token_usage (
+      tg_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      calls INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (tg_id, day)
+    );
   `);
   // migration: photo support for vision messages
   try { db.exec('ALTER TABLE messages ADD COLUMN photo TEXT'); } catch (e) { /* already there */ }
+  // migration: briefing cron jobs (AI-generated content, not plain reminders)
+  try { db.exec(`ALTER TABLE cron_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'reminder'`); } catch (e) { /* already there */ }
+  try { db.exec('ALTER TABLE cron_jobs ADD COLUMN prompt TEXT'); } catch (e) { /* already there */ }
   return db;
 }
 
@@ -151,18 +163,18 @@ function listReminders(tgId) {
   return db.prepare('SELECT id, text, fire_at FROM reminders WHERE tg_id = ? AND sent = 0 ORDER BY fire_at').all(tgId);
 }
 
-function addCronJob(tgId, expr, text) {
-  const r = db.prepare('INSERT INTO cron_jobs (tg_id, expr, text, created_at) VALUES (?,?,?,?)')
-    .run(tgId, expr, text, now());
+function addCronJob(tgId, expr, text, kind = 'reminder', prompt = null) {
+  const r = db.prepare('INSERT INTO cron_jobs (tg_id, expr, text, kind, prompt, created_at) VALUES (?,?,?,?,?,?)')
+    .run(tgId, expr, text, kind, prompt, now());
   return r.lastInsertRowid;
 }
 
 function listCronJobs(tgId) {
-  return db.prepare('SELECT id, expr, text FROM cron_jobs WHERE tg_id = ? ORDER BY id').all(tgId);
+  return db.prepare('SELECT id, expr, text, kind, prompt FROM cron_jobs WHERE tg_id = ? ORDER BY id').all(tgId);
 }
 
 function allCronJobs() {
-  return db.prepare('SELECT id, tg_id, expr, text FROM cron_jobs').all();
+  return db.prepare('SELECT id, tg_id, expr, text, kind, prompt FROM cron_jobs').all();
 }
 
 function deleteCronJob(tgId, id) {
@@ -181,6 +193,31 @@ function getUsage(tgId) {
   return row ? row.count : 0;
 }
 
+function addTokenUsage(tgId, u) {
+  if (!u) return;
+  const p = u.prompt_tokens || 0, c = u.completion_tokens || 0, t = u.total_tokens || (p + c);
+  if (!t && !p && !c) return;
+  db.prepare(`INSERT INTO token_usage (tg_id, day, prompt_tokens, completion_tokens, total_tokens, calls)
+              VALUES (?,?,?,?,?,1)
+              ON CONFLICT(tg_id, day) DO UPDATE SET
+                prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                completion_tokens = completion_tokens + excluded.completion_tokens,
+                total_tokens = total_tokens + excluded.total_tokens,
+                calls = calls + 1`)
+    .run(tgId, todayStr(), p, c, t);
+}
+
+function getTokenUsage(tgId) {
+  const row = db.prepare('SELECT prompt_tokens, completion_tokens, total_tokens, calls FROM token_usage WHERE tg_id = ? AND day = ?')
+    .get(tgId, todayStr());
+  return row || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, calls: 0 };
+}
+
+function getAllMessages(tgId, limit = 200) {
+  return db.prepare('SELECT role, content, created_at FROM messages WHERE tg_id = ? ORDER BY id ASC LIMIT ?')
+    .all(tgId, limit);
+}
+
 function stats() {
   const users = db.prepare('SELECT COUNT(*) c FROM users').get().c;
   const withApi = db.prepare('SELECT COUNT(*) c FROM api_configs').get().c;
@@ -195,8 +232,8 @@ function allUserIds() {
 module.exports = {
   init, upsertUser, setApiConfig, getApiConfig, deleteApiConfig,
   addMemory, listMemories, deleteMemory, deleteMemoryByText,
-  addMessage, getRecentMessages, clearMessages,
+  addMessage, getRecentMessages, getAllMessages, clearMessages,
   addReminder, dueReminders, markReminderSent, listReminders,
   addCronJob, listCronJobs, allCronJobs, deleteCronJob,
-  bumpUsage, getUsage, stats, allUserIds,
+  bumpUsage, getUsage, addTokenUsage, getTokenUsage, stats, allUserIds,
 };

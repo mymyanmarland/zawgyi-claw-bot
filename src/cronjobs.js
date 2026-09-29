@@ -30,13 +30,35 @@ function scheduleOne(job) {
   if (!sender || !cron.validate(job.expr)) return false;
   const task = cron.schedule(job.expr, async () => {
     try {
-      await sender(job.tg_id, `⏰🔁 **ထပ်တလဲလဲ သတိပေးချက်**\n\n📝 ${job.text}`);
+      if (job.kind === 'briefing') {
+        await runBriefing(job);
+      } else {
+        await sender(job.tg_id, `⏰🔁 **ထပ်တလဲလဲ သတိပေးချက်**\n\n📝 ${job.text}`);
+      }
     } catch (e) {
       console.error('cron send failed:', job.id, e.message);
     }
   }, { timezone: 'Asia/Yangon' });
   tasks.set(job.id, task);
   return true;
+}
+
+// AI briefing job: generate a web-grounded summary on the job's topic
+// using the user's own model API, then send it.
+async function runBriefing(job) {
+  const agent = require('./agent'); // lazy: avoids module cycles
+  try {
+    const text = await agent.briefing(job.tg_id, job.prompt || job.text);
+    await sender(job.tg_id, `📰 **AI သတင်းအကျဉ်း**\n\n${text}`);
+  } catch (e) {
+    console.error('briefing failed:', job.id, e.message);
+    try {
+      await sender(job.tg_id,
+        e.message === 'noapi'
+          ? '📰 သတင်းအကျဉ်း ထုတ်မရဘူး — Model API မချိတ်ရသေးပါ။ /setapi နဲ့ ချိတ်ပါ။'
+          : `📰 သတင်းအကျဉ်း ထုတ်မရဘူး 😅 (${String(e.message).slice(0, 120)})`);
+    } catch (e2) {}
+  }
 }
 
 function stopOne(id) {
@@ -53,14 +75,15 @@ function startAll() {
   console.log(`⏰🔁 ${n} cron jobs scheduled`);
 }
 
-function addJob(tgId, expr, text) {
+function addJob(tgId, expr, text, kind = 'reminder', prompt = null) {
   expr = (expr || '').trim();
   text = (text || '').trim();
   if (!text) return { error: 'notext' };
   if (!cron.validate(expr)) return { error: 'invalid' };
   if (db.listCronJobs(tgId).length >= MAX_PER_USER) return { error: 'limit' };
-  const id = db.addCronJob(tgId, expr, text);
-  scheduleOne({ id, tg_id: tgId, expr, text });
+  if (!['reminder', 'briefing'].includes(kind)) kind = 'reminder';
+  const id = db.addCronJob(tgId, expr, text, kind, prompt);
+  scheduleOne({ id, tg_id: tgId, expr, text, kind, prompt });
   return { id };
 }
 
