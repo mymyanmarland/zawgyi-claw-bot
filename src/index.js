@@ -14,12 +14,24 @@ async function main() {
   app.get('/', (req, res) => res.send('🧙‍♂️ Zaw Gyi Claw Bot is running'));
   app.listen(config.port, () => console.log(`HTTP on :${config.port}`));
 
+  // Graceful shutdown, registered BEFORE launch: wait for the long-poll to
+  // fully stop before exiting, so a restart doesn't collide (409) with the
+  // dying process's still-open getUpdates connection.
+  let bot = null;
+  async function shutdown(sig) {
+    console.log(`received ${sig}, stopping Telegram polling...`);
+    try { if (bot) await bot.stop(sig); } catch (e) {}
+    process.exit(0);
+  }
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+
   if (!config.botToken) {
     console.error('TELEGRAM_BOT_TOKEN not set — Telegram disabled, HTTP only.');
     return;
   }
 
-  const bot = createBot();
+  bot = createBot();
 
   // Reminder scheduler: every 30s
   cron.schedule('*/30 * * * * *', async () => {
@@ -52,9 +64,6 @@ async function main() {
   // Recurring cron-job reminders (persisted, Asia/Yangon)
   cronjobs.setSender((tgId, text) => bot.telegram.sendMessage(tgId, text));
   cronjobs.startAll();
-
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
 
 main().catch((e) => { console.error('fatal:', e); process.exit(1); });
