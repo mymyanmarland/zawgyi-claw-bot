@@ -5,6 +5,7 @@ const cronjobs = require('./cronjobs');
 const { encrypt, maskKey, decrypt } = require('./crypto');
 const { chat, probeApi } = require('./agent');
 const { saveTelegramPhoto } = require('./photos');
+const { saveTelegramAudio, transcribeAudio, whisperAvailable } = require('./audio');
 const config = require('./config');
 
 const NOAPI_MSG = `🔌 **Model API မချိတ်ရသေးပါ**
@@ -109,6 +110,7 @@ function createBot() {
       `🗑 /removeapi — API ဖျက်ရန်\n\n` +
       `💬 စာပို့လိုက်ရုံနဲ့ စကားပြောလို့ရတယ်\n` +
       `🖼 ပုံပို့လိုက်ရင် ပုံကို ကြည့်ပြီး ဖြေပေးနိုင်တယ်\n` +
+      `🎙️ voice message ပို့ရင် နားထောင်ပြီး ဖြေပေးတယ်\n` +
       `🆕 /new — စကားဝိုင်း အသစ်စ\n` +
       `🧠 /remember <အချက်> — မှတ်ထားရန်\n` +
       `📋 /memory — မှတ်ထားတာတွေ ကြည့်ရန်\n` +
@@ -348,6 +350,46 @@ function createBot() {
     const doc = ctx.message.document;
     if (!doc || !(doc.mime_type || '').startsWith('image/')) return; // only image files
     await handleIncomingImage(ctx, doc.file_id);
+  });
+
+  // --- voice: transcribe locally, then chat on the transcript ---
+  async function handleIncomingVoice(ctx, fileId) {
+    const tgId = String(ctx.from.id);
+    if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
+    if (db.getUsage(tgId) >= config.dailyLimit) {
+      return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
+    }
+    if (!whisperAvailable()) {
+      return ctx.reply('🎙️ အသံနားထောင်တဲ့ စနစ် server မှာ မတင်ရသေးပါ။ ခဏနေမှ ပြန်စမ်းပါ 🙏');
+    }
+    let statusMsg = null;
+    try { statusMsg = await ctx.reply('🎙️ အသံနားထောင်နေပါတယ်၊ ခဏစောင့်...'); } catch (e) {}
+    const typing = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
+    try {
+      const file = await saveTelegramAudio(config.botToken, config.dataDir, tgId, fileId);
+      const { text } = await transcribeAudio(config.dataDir, file);
+      clearInterval(typing);
+      if (statusMsg) await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
+      if (!text) {
+        return ctx.reply('🎙️ အသံမကြားရဘူး / နားမလည်ဘူး။ ထပ်ပြောကြည့်ပါလား?');
+      }
+      await handleChat(ctx, `🎙️ "${text}"`, null);
+    } catch (e) {
+      clearInterval(typing);
+      console.error('voice failed:', e.message);
+      if (statusMsg) await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
+      await ctx.reply(e.message === 'too_big'
+        ? '🎙️ အသံဖိုင် အရမ်းကြီးနေတယ်။ တိုတိုလေး ပြန်ပို့ကြည့်ပါ။'
+        : '😵 အသံကို နားမလည်ဘူး။ ထပ်စမ်းကြည့်ပါ။');
+    }
+  }
+
+  bot.on('voice', async (ctx) => {
+    if (ctx.message.voice) await handleIncomingVoice(ctx, ctx.message.voice.file_id);
+  });
+
+  bot.on('audio', async (ctx) => {
+    if (ctx.message.audio) await handleIncomingVoice(ctx, ctx.message.audio.file_id);
   });
 
   return bot;

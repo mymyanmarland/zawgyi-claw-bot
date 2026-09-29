@@ -30,6 +30,7 @@
 | ⏰ | **Reminders** — `/remind` with cron-powered delivery |
 | 🔁 | **Recurring cron jobs** — `/cron` or just ask ("နေ့တိုင်းမနက် ၈နာရီ သတိပေး") |
 | 🖼 | **Photo understanding** — send a picture, Zaw Gyi sees it (vision model) |
+| 🎙️ | **Voice messages** — send a voice note, Zaw Gyi transcribes it locally (faster-whisper) and replies |
 | 🆓 | **Freemium** — free tier: 100 AI messages / user / day |
 | 👑 | **Admin tools** — `/stats`, `/broadcast` (owner only) |
 
@@ -111,7 +112,7 @@ Then `/testapi` to verify, and just chat! 💬
 - [ ] 💳 Paid tiers + payments
 - [ ] 📊 Web dashboard
 - [ ] 💬 WhatsApp channel
-- [ ] 🎙️ Voice messages
+- [x] 🎙️ Voice messages (local faster-whisper transcription)
 - [x] 🖼️ Photo / file understanding
 - [ ] 👥 Group chat support
 

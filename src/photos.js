@@ -28,8 +28,8 @@ function pruneOld(dataDir) {
   } catch (e) {}
 }
 
-// Download a Telegram file_id into dataDir/photos, return the stored filename.
-async function saveTelegramPhoto(botToken, dataDir, tgId, fileId) {
+// Low-level: resolve a Telegram file_id and download its bytes.
+async function downloadTelegramFile(botToken, fileId, maxBytes) {
   const metaRes = await fetch(
     `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`,
     { signal: AbortSignal.timeout(20000) }
@@ -38,19 +38,25 @@ async function saveTelegramPhoto(botToken, dataDir, tgId, fileId) {
   if (!meta.ok || !meta.result || !meta.result.file_path) {
     throw new Error('Telegram getFile failed');
   }
-  if (meta.result.file_size && meta.result.file_size > MAX_BYTES) {
+  if (meta.result.file_size && meta.result.file_size > maxBytes) {
     throw new Error('too_big');
   }
-  const ext = (path.extname(meta.result.file_path) || '.jpg').toLowerCase();
+  const ext = (path.extname(meta.result.file_path) || '.bin').toLowerCase();
   const dl = await fetch(
     `https://api.telegram.org/file/bot${botToken}/${meta.result.file_path}`,
     { signal: AbortSignal.timeout(60000) }
   );
   if (!dl.ok) throw new Error(`download failed: HTTP ${dl.status}`);
-  const buf = Buffer.from(await dl.arrayBuffer());
-  if (buf.length > MAX_BYTES || buf.length === 0) throw new Error('too_big');
+  const buffer = Buffer.from(await dl.arrayBuffer());
+  if (buffer.length > maxBytes || buffer.length === 0) throw new Error('too_big');
+  return { buffer, ext };
+}
+
+// Download a Telegram file_id into dataDir/photos, return the stored filename.
+async function saveTelegramPhoto(botToken, dataDir, tgId, fileId) {
+  const { buffer, ext } = await downloadTelegramFile(botToken, fileId, MAX_BYTES);
   const name = `${tgId}_${Date.now()}${MIME[ext] ? ext : '.jpg'}`;
-  fs.writeFileSync(path.join(photoDir(dataDir), name), buf);
+  fs.writeFileSync(path.join(photoDir(dataDir), name), buffer);
   pruneOld(dataDir);
   return name;
 }
@@ -68,4 +74,4 @@ function photoDataUrl(dataDir, filename) {
   }
 }
 
-module.exports = { saveTelegramPhoto, photoDataUrl, photoDir, MAX_BYTES };
+module.exports = { saveTelegramPhoto, photoDataUrl, photoDir, downloadTelegramFile, MAX_BYTES };
