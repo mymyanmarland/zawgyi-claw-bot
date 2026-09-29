@@ -4,6 +4,7 @@ const db = require('./db');
 const cronjobs = require('./cronjobs');
 const { encrypt, maskKey, decrypt } = require('./crypto');
 const { chat, probeApi } = require('./agent');
+const { saveTelegramPhoto } = require('./photos');
 const config = require('./config');
 
 const NOAPI_MSG = `🔌 **Model API မချိတ်ရသေးပါ**
@@ -90,7 +91,7 @@ function createBot() {
     await ctx.reply(
       `🧙‍♂️ **မင်္ဂလာပါ! ကျွန်တော်က ဇော်ဂျီ**\n\n` +
       `မင်းရဲ့ ကိုယ်ပိုင် AI လက်ထောက် — မြန်မာလိုပြောမယ်၊ မှတ်ဉာဏ်ရှိတယ်၊ ` +
-      `အင်တာနက်ရှာပေးနိုင်တယ်၊ သတိပေးချက်ထားပေးနိုင်တယ်။\n\n` +
+      `အင်တာနက်ရှာပေးနိုင်တယ်၊ သတိပေးချက်ထားပေးနိုင်တယ်၊ ပုံတွေကို ကြည့်ပြီး ဖြေပေးနိုင်တယ်။\n\n` +
       `**စတင်ရန် (၃ ဆင့်):**\n` +
       `1️⃣ /setapi — ကိုယ့် Model API ချိတ်ပါ\n` +
       `2️⃣ /testapi — ချိတ်ဆက်မှု စမ်းပါ\n` +
@@ -107,6 +108,7 @@ function createBot() {
       `🔍 /myapi — ချိတ်ထားတာ ကြည့်ရန်\n` +
       `🗑 /removeapi — API ဖျက်ရန်\n\n` +
       `💬 စာပို့လိုက်ရုံနဲ့ စကားပြောလို့ရတယ်\n` +
+      `🖼 ပုံပို့လိုက်ရင် ပုံကို ကြည့်ပြီး ဖြေပေးနိုင်တယ်\n` +
       `🆕 /new — စကားဝိုင်း အသစ်စ\n` +
       `🧠 /remember <အချက်> — မှတ်ထားရန်\n` +
       `📋 /memory — မှတ်ထားတာတွေ ကြည့်ရန်\n` +
@@ -279,7 +281,7 @@ function createBot() {
   });
 
   // --- chat ---
-  bot.on('text', async (ctx) => {
+  async function handleChat(ctx, text, photoFile) {
     const tgId = String(ctx.from.id);
     const u = ctx.from;
     db.upsertUser(tgId, u.username, u.first_name);
@@ -292,15 +294,60 @@ function createBot() {
     try { await ctx.sendChatAction('typing'); } catch (e) {}
     const typing = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
     try {
-      const result = await chat(tgId, ctx.message.text);
+      const result = await chat(tgId, text, photoFile);
       clearInterval(typing);
       if (result.error === 'noapi') return replyLong(ctx, NOAPI_MSG);
+      if (result.error === 'novision') {
+        return ctx.reply(
+          '😅 ဒီ model က ပုံမဖတ်နိုင်ဘူး။\n\n' +
+          'Vision ရတဲ့ model သုံးပါ — ဥပမာ:\n' +
+          '/setapi <url> <key> claude-sonnet-5'
+        );
+      }
       await replyLong(ctx, result.text);
     } catch (e) {
       clearInterval(typing);
       console.error('chat error:', e.message);
       await ctx.reply('😵 တစ်ခုခု မှားသွားတယ်။ API key သက်တမ်းကုန်နေလား /testapi နဲ့ စစ်ကြည့်ပါ။');
     }
+  }
+
+  bot.on('text', async (ctx) => {
+    await handleChat(ctx, ctx.message.text, null);
+  });
+
+  // --- photos: user sends an image, bot "sees" it via a vision model ---
+  async function handleIncomingImage(ctx, fileId) {
+    const tgId = String(ctx.from.id);
+    if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
+    if (db.getUsage(tgId) >= config.dailyLimit) {
+      return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
+    }
+    const caption = (ctx.message.caption || '').trim() || 'ဒီပုံကို ကြည့်ပေးပါ 🙏';
+    try { await ctx.sendChatAction('typing'); } catch (e) {}
+    let file;
+    try {
+      file = await saveTelegramPhoto(config.botToken, config.dataDir, tgId, fileId);
+    } catch (e) {
+      console.error('photo download failed:', e.message);
+      return ctx.reply(e.message === 'too_big'
+        ? '😅 ပုံက အရမ်းကြီးနေတယ်။ အရွယ်အစား သေးတာလေး ပြန်ပို့ကြည့်ပါ။'
+        : '😵 ပုံကို ယူမရဘူး။ ထပ်ပို့ကြည့်ပါ။');
+    }
+    await handleChat(ctx, caption, file);
+  }
+
+  bot.on('photo', async (ctx) => {
+    const sizes = ctx.message.photo || [];
+    if (!sizes.length) return;
+    const best = sizes[sizes.length - 1]; // largest
+    await handleIncomingImage(ctx, best.file_id);
+  });
+
+  bot.on('document', async (ctx) => {
+    const doc = ctx.message.document;
+    if (!doc || !(doc.mime_type || '').startsWith('image/')) return; // only image files
+    await handleIncomingImage(ctx, doc.file_id);
   });
 
   return bot;

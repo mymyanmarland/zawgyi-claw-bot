@@ -29,6 +29,7 @@
 | 🔍 | **Live web search** — answers grounded in real-time results |
 | ⏰ | **Reminders** — `/remind` with cron-powered delivery |
 | 🔁 | **Recurring cron jobs** — `/cron` or just ask ("နေ့တိုင်းမနက် ၈နာရီ သတိပေး") |
+| 🖼 | **Photo understanding** — send a picture, Zaw Gyi sees it (vision model) |
 | 🆓 | **Freemium** — free tier: 100 AI messages / user / day |
 | 👑 | **Admin tools** — `/stats`, `/broadcast` (owner only) |
 
@@ -111,7 +112,7 @@ Then `/testapi` to verify, and just chat! 💬
 - [ ] 📊 Web dashboard
 - [ ] 💬 WhatsApp channel
 - [ ] 🎙️ Voice messages
-- [ ] 🖼️ Photo / file understanding
+- [x] 🖼️ Photo / file understanding
 - [ ] 👥 Group chat support
 
 ## 📄 License

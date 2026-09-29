@@ -60,6 +60,8 @@ function init(dataDir) {
     );
     CREATE INDEX IF NOT EXISTS idx_cron_user ON cron_jobs(tg_id);
   `);
+  // migration: photo support for vision messages
+  try { db.exec('ALTER TABLE messages ADD COLUMN photo TEXT'); } catch (e) { /* already there */ }
   return db;
 }
 
@@ -113,9 +115,9 @@ function deleteMemoryByText(tgId, text) {
   return r.changes;
 }
 
-function addMessage(tgId, role, content) {
-  db.prepare('INSERT INTO messages (tg_id, role, content, created_at) VALUES (?,?,?,?)')
-    .run(tgId, role, content, now());
+function addMessage(tgId, role, content, photo) {
+  db.prepare('INSERT INTO messages (tg_id, role, content, photo, created_at) VALUES (?,?,?,?,?)')
+    .run(tgId, role, content, photo || null, now());
   // keep last 60 per user
   db.prepare(`DELETE FROM messages WHERE tg_id = ? AND id NOT IN
               (SELECT id FROM messages WHERE tg_id = ? ORDER BY id DESC LIMIT 60)`)
@@ -123,7 +125,7 @@ function addMessage(tgId, role, content) {
 }
 
 function getRecentMessages(tgId, limit = 20) {
-  return db.prepare('SELECT role, content FROM messages WHERE tg_id = ? ORDER BY id DESC LIMIT ?')
+  return db.prepare('SELECT role, content, photo FROM messages WHERE tg_id = ? ORDER BY id DESC LIMIT ?')
     .all(tgId, limit).reverse();
 }
 

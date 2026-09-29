@@ -2,7 +2,11 @@
 const db = require('./db');
 const { decrypt } = require('./crypto');
 const { toolDefs, runTool } = require('./tools');
+const { photoDataUrl } = require('./photos');
 const config = require('./config');
+
+// How many recent photo messages keep their image attached in history (bounds payload size).
+const HISTORY_PHOTOS = 3;
 
 const PERSONA = `မင်းနာမည်က ဇော်ဂျီ 🧙‍♂️ — အသုံးပြုသူရဲ့ ကိုယ်ပိုင် AI လက်ထောက်။
 
@@ -15,6 +19,7 @@ const PERSONA = `မင်းနာမည်က ဇော်ဂျီ 🧙‍♂
 - လက်ရှိ သတင်း/ဈေးနှုန်း/ရာသီဥတု လိုမျိုး မေးရင် web_search tool ကို သုံး
 - အသုံးပြုသူ့အကြောင်း ရေရှည်မှတ်ထားသင့်တဲ့ အချက် (နာမည်, ကြိုက်တာ) တွေ့ရင် remember_fact သုံး
 - ထပ်တလဲလဲ သတိပေးချက် တောင်းရင် ("နေ့တိုင်း", "အပတ်တိုင်း", "regularly") schedule_cron tool သုံး — သဘာဝစကားကို cron expression ပြောင်း ("0 8 * * *" = နေ့တိုင်း မနက် ၈နာရီ)
+- အသုံးပြုသူက ပုံ (photo) ပို့လာရင် ပုံကို မြင်ရတယ် — ပုံထဲက အကြောင်းအရာ/စာသား/ဇယား/ပြဿနာကို ဖတ်ပြ၊ ရှင်းပြ၊ ခွဲခြမ်းစိတ်ဖြာပေးနိုင်
 - Emoji ကို သင့်တော်သလောက်ပဲ သုံး`;
 
 function buildSystemPrompt(tgId) {
@@ -69,32 +74,67 @@ async function probeApi(baseUrl, apiKey, model) {
   return true;
 }
 
-async function chat(tgId, userText) {
+// Build the OpenAI-style messages array. Photo messages become multimodal
+// content parts (only the most recent HISTORY_PHOTOS keep their image).
+function buildChatMessages(dataDir, systemPrompt, history, curText, curPhoto) {
+  const photoIdx = [];
+  history.forEach((m, i) => { if (m.role === 'user' && m.photo) photoIdx.push(i); });
+  const keep = new Set(photoIdx.slice(-HISTORY_PHOTOS));
+
+  const toMsg = (text, photo, withImage) => {
+    if (withImage && photo) {
+      const url = photoDataUrl(dataDir, photo);
+      if (url) {
+        return [
+          { type: 'text', text: text || 'ဒီပုံကို ကြည့်ပေးပါ' },
+          { type: 'image_url', image_url: { url } },
+        ];
+      }
+    }
+    return (text || '') + (photo ? ' [ပုံ 📷]' : '');
+  };
+
+  const messages = [{ role: 'system', content: systemPrompt }];
+  history.forEach((m, i) => {
+    messages.push({ role: m.role, content: toMsg(m.content, m.photo, keep.has(i)) });
+  });
+  messages.push({ role: 'user', content: toMsg(curText, curPhoto, true) });
+  return messages;
+}
+
+async function chat(tgId, userText, photoFile) {
   const apiCfg = db.getApiConfig(tgId);
   if (!apiCfg) return { error: 'noapi' };
 
-  db.addMessage(tgId, 'user', userText);
+  db.addMessage(tgId, 'user', userText, photoFile || null);
   const history = db.getRecentMessages(tgId, 20);
-  const messages = [
-    { role: 'system', content: buildSystemPrompt(tgId) },
-    ...history.map(m => ({ role: m.role, content: m.content })),
-  ];
+  // last row is the message we just added — build it as the current turn
+  const cur = history.pop();
+  const messages = buildChatMessages(config.dataDir, buildSystemPrompt(tgId), history, cur.content, cur.photo);
 
   let finalText = '';
-  for (let i = 0; i < 5; i++) {
-    const msg = await callModel(apiCfg, messages, toolDefs);
-    messages.push(msg);
-    const calls = msg.tool_calls || [];
-    if (!calls.length) {
-      finalText = msg.content || '';
-      break;
+  try {
+    for (let i = 0; i < 5; i++) {
+      const msg = await callModel(apiCfg, messages, toolDefs);
+      messages.push(msg);
+      const calls = msg.tool_calls || [];
+      if (!calls.length) {
+        finalText = msg.content || '';
+        break;
+      }
+      for (const c of calls) {
+        let args = {};
+        try { args = JSON.parse(c.function.arguments || '{}'); } catch (e) {}
+        const out = await runTool(c.function.name, args, tgId);
+        messages.push({ role: 'tool', tool_call_id: c.id, content: String(out) });
+      }
     }
-    for (const c of calls) {
-      let args = {};
-      try { args = JSON.parse(c.function.arguments || '{}'); } catch (e) {}
-      const out = await runTool(c.function.name, args, tgId);
-      messages.push({ role: 'tool', tool_call_id: c.id, content: String(out) });
+  } catch (e) {
+    // Model doesn't accept images (non-vision model)
+    if (/\b400\b/.test(e.message) && /image|vision|multimodal/i.test(e.message)) {
+      return { error: 'novision' };
     }
+    throw e;
   }
   if (!finalText) finalText = 'တစ်ခုခု မှားသွားတယ်၊ ထပ်စမ်းကြည့်ပါ။';
   db.addMessage(tgId, 'assistant', finalText);
@@ -102,4 +142,4 @@ async function chat(tgId, userText) {
   return { text: finalText };
 }
 
-module.exports = { chat, probeApi };
+module.exports = { chat, probeApi, buildChatMessages };
