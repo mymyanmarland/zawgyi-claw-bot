@@ -3,6 +3,7 @@ const express = require('express');
 const cron = require('node-cron');
 const config = require('./config');
 const db = require('./db');
+const cronjobs = require('./cronjobs');
 const { createBot } = require('./telegram');
 
 async function main() {
@@ -33,8 +34,24 @@ async function main() {
     }
   });
 
-  await bot.launch();
+  // Launch with retry: a 409 means a previous long-poll is still registered
+  // server-side (e.g. right after a restart). Wait and retry instead of crash-looping.
+  let launched = false;
+  for (let attempt = 1; attempt <= 12 && !launched; attempt++) {
+    try {
+      await bot.launch();
+      launched = true;
+    } catch (e) {
+      console.error(`telegram launch attempt ${attempt} failed:`, e.message);
+      if (attempt === 12) throw e;
+      await new Promise((r) => setTimeout(r, 20000));
+    }
+  }
   console.log('🧙‍♂️ Zaw Gyi Claw Bot launched (polling)');
+
+  // Recurring cron-job reminders (persisted, Asia/Yangon)
+  cronjobs.setSender((tgId, text) => bot.telegram.sendMessage(tgId, text));
+  cronjobs.startAll();
 
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));

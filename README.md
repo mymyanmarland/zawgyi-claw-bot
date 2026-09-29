@@ -28,6 +28,7 @@
 | 🧠 | **Agent loop + tools** — web search, Myanmar time, memory, reminders |
 | 🔍 | **Live web search** — answers grounded in real-time results |
 | ⏰ | **Reminders** — `/remind` with cron-powered delivery |
+| 🔁 | **Recurring cron jobs** — `/cron` or just ask ("နေ့တိုင်းမနက် ၈နာရီ သတိပေး") |
 | 🆓 | **Freemium** — free tier: 100 AI messages / user / day |
 | 👑 | **Admin tools** — `/stats`, `/broadcast` (owner only) |
 
@@ -88,6 +89,8 @@ Then `/testapi` to verify, and just chat! 💬
 | `/memory` / `/forget <n>` | View / delete memories |
 | `/remind <time> <text>` | Set a reminder (`10m`, `2h`, `မနက် ၈နာရီ`) |
 | `/reminders` | List your reminders |
+| `/cron <expr> <text>` | Recurring reminder (`0 8 * * *` = daily 8am) |
+| `/crons` / `/uncron <id>` | List / delete recurring reminders |
 | `/new` | Clear conversation context |
 | `/stats` / `/broadcast` | 👑 Owner only |
 

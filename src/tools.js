@@ -82,6 +82,41 @@ const toolDefs = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'schedule_cron',
+      description: 'Create a RECURRING scheduled reminder (cron job) that fires repeatedly. Convert the user\'s natural-language schedule into a cron expression "minute hour day month weekday" (Asia/Yangon timezone). Examples: daily 8am -> "0 8 * * *", every Monday 9am -> "0 9 * * 1", every 30 minutes -> "*/30 * * * *", daily 10pm -> "0 22 * * *", 1st of month -> "0 9 1 * *". Use for "every day", "weekly", "remind me regularly" requests.',
+      parameters: {
+        type: 'object',
+        properties: {
+          expression: { type: 'string', description: 'Cron expression, e.g. "0 8 * * *"' },
+          text: { type: 'string', description: 'Reminder message to send each time' },
+        },
+        required: ['expression', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_crons',
+      description: 'List the user\'s recurring scheduled reminders (cron jobs).',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_cron',
+      description: 'Delete a recurring scheduled reminder by its id (see list_crons).',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'number', description: 'Cron job id' } },
+        required: ['id'],
+      },
+    },
+  },
 ];
 
 async function runTool(name, args, tgId) {
@@ -95,6 +130,26 @@ async function runTool(name, args, tgId) {
     if (name === 'forget_fact') {
       const n = db.deleteMemoryByText(tgId, args.text || '');
       return n ? `${n} ခု ဖျက်ပြီးပြီ။` : 'မတွေ့ပါ။';
+    }
+    if (name === 'schedule_cron') {
+      const cj = require('./cronjobs');
+      const r = cj.addJob(tgId, args.expression || '', args.text || '');
+      if (r.error === 'invalid') return '❌ cron expression မှားနေတယ်။ ပုံစံ: "မိနစ် နာရီ ရက် လ နေ့" ဥပမာ "0 8 * * *" (နေ့တိုင်း မနက် ၈နာရီ)';
+      if (r.error === 'limit') return `❌ cron job ${cj.MAX_PER_USER} ခု ပြည့်နေပြီ။`;
+      if (r.error === 'notext') return '❌ သတိပေးမယ့် စာသားလိုတယ်။';
+      return `⏰🔁 ထပ်တလဲလဲ သတိပေးချက် ဖန်တီးပြီးပြီ (id ${r.id}): ${cj.humanize(args.expression)} — ${args.text}`;
+    }
+    if (name === 'list_crons') {
+      const list = db.listCronJobs(tgId);
+      if (!list.length) return '🔁 cron job မရှိသေးပါ။';
+      const cj = require('./cronjobs');
+      return '🔁 ထပ်တလဲလဲ သတိပေးချက်များ:\n' +
+        list.map(j => `[${j.id}] ${j.text} — ${cj.humanize(j.expr)} (${j.expr})`).join('\n');
+    }
+    if (name === 'delete_cron') {
+      const cj = require('./cronjobs');
+      const ok = cj.removeJob(tgId, parseInt(args.id));
+      return ok ? `🗑 [${args.id}] ဖျက်ပြီးပြီ။` : 'မတွေ့ပါ။';
     }
     return 'unknown tool';
   } catch (e) {

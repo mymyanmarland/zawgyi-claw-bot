@@ -51,6 +51,14 @@ function init(dataDir) {
       count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (tg_id, day)
     );
+    CREATE TABLE IF NOT EXISTS cron_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tg_id TEXT NOT NULL,
+      expr TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cron_user ON cron_jobs(tg_id);
   `);
   return db;
 }
@@ -141,6 +149,25 @@ function listReminders(tgId) {
   return db.prepare('SELECT id, text, fire_at FROM reminders WHERE tg_id = ? AND sent = 0 ORDER BY fire_at').all(tgId);
 }
 
+function addCronJob(tgId, expr, text) {
+  const r = db.prepare('INSERT INTO cron_jobs (tg_id, expr, text, created_at) VALUES (?,?,?,?)')
+    .run(tgId, expr, text, now());
+  return r.lastInsertRowid;
+}
+
+function listCronJobs(tgId) {
+  return db.prepare('SELECT id, expr, text FROM cron_jobs WHERE tg_id = ? ORDER BY id').all(tgId);
+}
+
+function allCronJobs() {
+  return db.prepare('SELECT id, tg_id, expr, text FROM cron_jobs').all();
+}
+
+function deleteCronJob(tgId, id) {
+  const r = db.prepare('DELETE FROM cron_jobs WHERE tg_id = ? AND id = ?').run(tgId, id);
+  return r.changes > 0;
+}
+
 function bumpUsage(tgId) {
   const day = todayStr();
   db.prepare(`INSERT INTO usage (tg_id, day, count) VALUES (?,?,1)
@@ -168,5 +195,6 @@ module.exports = {
   addMemory, listMemories, deleteMemory, deleteMemoryByText,
   addMessage, getRecentMessages, clearMessages,
   addReminder, dueReminders, markReminderSent, listReminders,
+  addCronJob, listCronJobs, allCronJobs, deleteCronJob,
   bumpUsage, getUsage, stats, allUserIds,
 };

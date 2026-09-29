@@ -1,6 +1,7 @@
 // Telegram bot: commands + message handling.
 const { Telegraf } = require('telegraf');
 const db = require('./db');
+const cronjobs = require('./cronjobs');
 const { encrypt, maskKey, decrypt } = require('./crypto');
 const { chat, probeApi } = require('./agent');
 const config = require('./config');
@@ -111,7 +112,10 @@ function createBot() {
       `📋 /memory — မှတ်ထားတာတွေ ကြည့်ရန်\n` +
       `❌ /forget <id> — မေ့ခိုင်းရန်\n` +
       `⏰ /remind <အချိန်> <စာ> — သတိပေးချက်\n` +
-      `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်`
+      `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်\n` +
+      `🔁 /cron <expression> <စာ> — ထပ်တလဲလဲ သတိပေးချက်\n` +
+      `📋 /crons — cron များ ကြည့်ရန်\n` +
+      `🗑 /uncron <id> — cron ဖျက်ရန်`
     );
   });
 
@@ -207,6 +211,51 @@ function createBot() {
     const list = db.listReminders(String(ctx.from.id));
     if (!list.length) return ctx.reply('သတိပေးချက် မရှိပါ။');
     await ctx.reply('⏰ **သတိပေးချက်များ:**\n' + list.map(r => `[${r.id}] ${r.text} — ${fmtTime(r.fire_at)}`).join('\n'));
+  });
+
+  const CRON_HELP = `🔁 **ထပ်တလဲလဲ သတိပေးချက် (Cron)**
+
+သုံးပုံ: /cron <expression> <စာ>
+
+**Expression ပုံစံ:** မိနစ် နာရီ ရက် လ နေ့
+\`0 8 * * *\` → နေ့တိုင်း မနက် ၈:၀၀
+\`30 18 * * *\` → နေ့တိုင်း ညနေ ၆:၃၀
+\`0 9 * * 1\` → တနင်္လာနေ့တိုင်း မနက် ၉:၀၀
+\`*/30 * * * *\` → မိနစ် ၃၀ တိုင်း
+\`0 0 1 * *\` → လတိုင်း ၁ ရက်နေ့
+
+ဥပမာ:
+/cron 0 8 * * * မနက်စာ စားဖို့
+/cron 0 22 * * * ဖုန်းအားသွင်းဖို့ 🔋
+
+အချိန်ဇုန်: Asia/Yangon 🇲🇲`;
+
+  bot.command('cron', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    const rest = ctx.message.text.replace(/^\/cron\s+/, '').trim();
+    const m = rest.match(/^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+([\s\S]+)$/);
+    if (!m) return replyLong(ctx, CRON_HELP);
+    const [, expr, text] = m;
+    const r = cronjobs.addJob(tgId, expr, text.trim());
+    if (r.error === 'invalid') return ctx.reply('❌ expression မှားနေတယ်။\n\n' + CRON_HELP);
+    if (r.error === 'limit') return ctx.reply(`❌ cron job ${cronjobs.MAX_PER_USER} ခု ပြည့်နေပြီ။ /uncron နဲ့ အဟောင်းဖျက်ပါ။`);
+    if (r.error === 'notext') return ctx.reply('❌ သတိပေးမယ့် စာသားပါထည့်ပါ။');
+    await ctx.reply(`⏰🔁 ဖန်တီးပြီးပြီ (id ${r.id}):\n📝 ${text.trim()}\n🕐 ${cronjobs.humanize(expr)}\n\`/crons\` နဲ့ ကြည့်နိုင်တယ်।`);
+  });
+
+  bot.command('crons', async (ctx) => {
+    const list = db.listCronJobs(String(ctx.from.id));
+    if (!list.length) return replyLong(ctx, '🔁 cron job မရှိသေးပါ။\n\n' + CRON_HELP);
+    await ctx.reply('🔁 **ထပ်တလဲလဲ သတိပေးချက်များ:**\n' +
+      list.map(j => `[${j.id}] ${j.text}\n      🕐 ${cronjobs.humanize(j.expr)} \`${j.expr}\``).join('\n'));
+  });
+
+  bot.command('uncron', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    const arg = ctx.message.text.replace(/^\/uncron\s+/, '').trim();
+    if (!/^\d+$/.test(arg)) return ctx.reply('သုံးပုံ: /uncron <id>\n/crons နဲ့ id ကြည့်ပါ။');
+    const ok = cronjobs.removeJob(tgId, parseInt(arg));
+    await ctx.reply(ok ? `🗑 [${arg}] ဖျက်ပြီးပြီ။` : 'မတွေ့ပါ။ /crons နဲ့ စစ်ပါ။');
   });
 
   // --- admin ---
