@@ -41,14 +41,14 @@ async function callModel(apiCfg, messages, tools) {
     model: apiCfg.model,
     messages,
     temperature: 0.7,
-    max_tokens: 1500,
+    max_tokens: 4000, // room for file content from send_file
   };
   if (tools) { body.tools = tools; body.tool_choice = 'auto'; }
   const res = await fetch(base + '/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(90000),
+    signal: AbortSignal.timeout(120000), // long generations (files) need time
   });
   if (!res.ok) {
     const t = await res.text().catch(() => '');

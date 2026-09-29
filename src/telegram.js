@@ -322,7 +322,20 @@ function createBot() {
     } catch (e) {
       clearInterval(typing);
       console.error('chat error:', e.message);
-      await ctx.reply('😵 တစ်ခုခု မှားသွားတယ်။ API key သက်တမ်းကုန်နေလား /testapi နဲ့ စစ်ကြည့်ပါ။');
+      const em = e.message || '';
+      if (/abort|timeout/i.test(em)) {
+        await ctx.reply(
+          '⏳ AI server က တုံ့ပြန်တာ ကြာလွန်းလို့ ရပ်လိုက်ရတယ်။\n\n' +
+          'ဖြစ်နိုင်တဲ့ အကြောင်းရင်းများ:\n' +
+          '• တောင်းထားတဲ့ file/စာ ရှည်လွန်းနေတာ\n' +
+          '• AI server အခု အားနည်းနေတာ\n\n' +
+          'ခဏနေမှ ထပ်စမ်းကြည့်ပါ 🙏'
+        );
+      } else if (/\b401\b/.test(em)) {
+        await ctx.reply('🔑 API key မမှန်ဘူး (သို့) သက်တမ်းကုန်နေပြီ။ /testapi နဲ့ စစ်ကြည့်ပါ။');
+      } else {
+        await ctx.reply('😵 တစ်ခုခု မှားသွားတယ်။ /testapi နဲ့ API စစ်ကြည့်ပါ။');
+      }
     }
   }
 
