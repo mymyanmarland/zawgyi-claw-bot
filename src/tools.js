@@ -1,5 +1,62 @@
-// Agent tools. Safe for SaaS: no shell, no filesystem. Read-only web + memory.
+// Agent tools. Safe for SaaS: no shell, no arbitrary filesystem. Read-only web + memory + sandboxed file outbox.
+const fs = require('fs');
+const path = require('path');
 const db = require('./db');
+const config = require('./config');
+
+// --- send_file: agent-created attachments (per-user sandboxed outbox) ---
+const OUTBOX_TTL_MS = 7 * 86400000;
+const MAX_FILE_BYTES = 200 * 1024;
+const MAX_FILES_PER_TURN = 3;
+const ALLOWED_EXT = new Set(['txt', 'md', 'csv', 'json', 'html', 'log']);
+
+function outboxDir(tgId) {
+  const d = path.join(config.dataDir, 'outbox', String(tgId).replace(/[^0-9]/g, ''));
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+
+function pruneOutbox(tgId) {
+  try {
+    const dir = outboxDir(tgId);
+    const cutoff = Date.now() - OUTBOX_TTL_MS;
+    for (const f of fs.readdirSync(dir)) {
+      const p = path.join(dir, f);
+      try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p); } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+function safeFilename(raw) {
+  let n = String(raw || 'file.txt').trim().slice(0, 60) || 'file.txt';
+  // allow letters, digits, Myanmar script, dot, dash, underscore; everything else -> _
+  n = n.replace(/[^a-zA-Z0-9._\-\u1000-\u109F]/g, '_').replace(/_+/g, '_');
+  n = n.replace(/^\.+/, '').replace(/\.+$/, '');
+  if (!n) n = 'file.txt';
+  const ext = path.extname(n).slice(1).toLowerCase();
+  if (!ALLOWED_EXT.has(ext)) n = n.replace(/\.[^.]*$/, '') + '.txt';
+  if (!path.extname(n)) n += '.txt';
+  return n;
+}
+
+function createOutboxFile(tgId, filename, content) {
+  const text = String(content || '');
+  if (!text.trim()) return { error: 'empty' };
+  if (Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) return { error: 'too_big' };
+  const dir = outboxDir(tgId);
+  pruneOutbox(tgId);
+  const name = safeFilename(filename);
+  // avoid collisions within the outbox
+  let finalName = name, i = 1;
+  while (fs.existsSync(path.join(dir, finalName)) && i < 100) {
+    const ext = path.extname(name), base = path.basename(name, ext);
+    finalName = `${base}_${i}${ext}`;
+    i++;
+  }
+  const full = path.join(dir, finalName);
+  fs.writeFileSync(full, text, 'utf8');
+  return { path: full, name: finalName, bytes: Buffer.byteLength(text, 'utf8') };
+}
 
 // --- web_search via DuckDuckGo html (free, no key) ---
 async function webSearch(query) {
@@ -86,7 +143,7 @@ const toolDefs = [
     type: 'function',
     function: {
       name: 'schedule_cron',
-      description: 'Create a RECURRING scheduled reminder (cron job) that fires repeatedly. Convert the user\'s natural-language schedule into a cron expression "minute hour day month weekday" (Asia/Yangon timezone). Examples: daily 8am -> "0 8 * * *", every Monday 9am -> "0 9 * * 1", every 30 minutes -> "*/30 * * * *", daily 10pm -> "0 22 * * *", 1st of month -> "0 9 1 * *". Use for "every day", "weekly", "remind me regularly" requests.',
+      description: 'Create a RECURRING scheduled reminder (cron job) that fires repeatedly. Convert the user\'s natural-language schedule into a cron expression "minute hour day month weekday" (Asia/Yangon timezone). Examples: daily 8am -> "0 8 * * *", every Monday 9am -> "0 9 * * 1", every 30 minutes -> "*/30 * * *", daily 10pm -> "0 22 * * *", 1st of month -> "0 9 1 * *". Use for "every day", "weekly", "remind me regularly" requests.',
       parameters: {
         type: 'object',
         properties: {
@@ -114,6 +171,21 @@ const toolDefs = [
         type: 'object',
         properties: { id: { type: 'number', description: 'Cron job id' } },
         required: ['id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_file',
+      description: 'Create a TEXT file and send it to the user as a Telegram document attachment. Use when the user asks for a file ("file လုပ်ပေး", "txt အဖြစ်ပို့", "စာရင်းကို file နဲ့ပို့"). The file content must be plain text (notes, lists, tables as CSV, reports in Markdown). Max ~200KB per file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: { type: 'string', description: 'File name, e.g. "shopping-list.txt" or "report.md"' },
+          content: { type: 'string', description: 'Full text content of the file' },
+        },
+        required: ['filename', 'content'],
       },
     },
   },
@@ -151,10 +223,20 @@ async function runTool(name, args, tgId) {
       const ok = cj.removeJob(tgId, parseInt(args.id));
       return ok ? `🗑 [${args.id}] ဖျက်ပြီးပြီ။` : 'မတွေ့ပါ။';
     }
+    if (name === 'send_file') {
+      const r = createOutboxFile(tgId, args.filename, args.content);
+      if (r.error === 'empty') return '❌ file content အလွတ်ဖြစ်နေတယ်။';
+      if (r.error === 'too_big') return '❌ file အရမ်းကြီးနေတယ် (200KB အထိပဲ ရတယ်)။ အတိုချုံးပြီး ထပ်စမ်းပါ။';
+      const kb = (r.bytes / 1024).toFixed(1);
+      return {
+        text: `📎 file အသင့်ဖြစ်ပြီ: ${r.name} (${kb}KB) — အသုံးပြုသူကို attachment အဖြစ် ပို့ပေးမယ်။`,
+        attachment: { path: r.path, name: r.name },
+      };
+    }
     return 'unknown tool';
   } catch (e) {
     return 'Tool error: ' + e.message;
   }
 }
 
-module.exports = { toolDefs, runTool };
+module.exports = { toolDefs, runTool, MAX_FILES_PER_TURN };

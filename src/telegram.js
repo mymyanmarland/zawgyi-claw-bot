@@ -111,6 +111,7 @@ function createBot() {
       `💬 စာပို့လိုက်ရုံနဲ့ စကားပြောလို့ရတယ်\n` +
       `🖼 ပုံပို့လိုက်ရင် ပုံကို ကြည့်ပြီး ဖြေပေးနိုင်တယ်\n` +
       `🎙️ voice message ပို့ရင် နားထောင်ပြီး ဖြေပေးတယ်\n` +
+      `📎 file လုပ်ခိုင်းရင် attachment အဖြစ် တိုက်ရိုက်ပို့ပေးတယ်\n` +
       `🆕 /new — စကားဝိုင်း အသစ်စ\n` +
       `🧠 /remember <အချက်> — မှတ်ထားရန်\n` +
       `📋 /memory — မှတ်ထားတာတွေ ကြည့်ရန်\n` +
@@ -307,6 +308,17 @@ function createBot() {
         );
       }
       await replyLong(ctx, result.text);
+      // agent-created file attachments -> send as Telegram documents
+      if (result.files && result.files.length) {
+        for (const f of result.files) {
+          try {
+            await ctx.replyWithDocument({ source: f.path, filename: f.name });
+          } catch (e) {
+            console.error('sendDocument failed:', e.message);
+            await ctx.reply(`📎 ${f.name} ပို့မရဘူး 😅`).catch(() => {});
+          }
+        }
+      }
     } catch (e) {
       clearInterval(typing);
       console.error('chat error:', e.message);

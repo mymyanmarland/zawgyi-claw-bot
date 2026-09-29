@@ -1,7 +1,7 @@
 // The agent loop: chat completions + tool calls against the user's OWN model API.
 const db = require('./db');
 const { decrypt } = require('./crypto');
-const { toolDefs, runTool } = require('./tools');
+const { toolDefs, runTool, MAX_FILES_PER_TURN } = require('./tools');
 const { photoDataUrl } = require('./photos');
 const config = require('./config');
 
@@ -21,6 +21,7 @@ const PERSONA = `မင်းနာမည်က ဇော်ဂျီ 🧙‍♂
 - ထပ်တလဲလဲ သတိပေးချက် တောင်းရင် ("နေ့တိုင်း", "အပတ်တိုင်း", "regularly") schedule_cron tool သုံး — သဘာဝစကားကို cron expression ပြောင်း ("0 8 * * *" = နေ့တိုင်း မနက် ၈နာရီ)
 - အသုံးပြုသူက ပုံ (photo) ပို့လာရင် ပုံကို မြင်ရတယ် — ပုံထဲက အကြောင်းအရာ/စာသား/ဇယား/ပြဿနာကို ဖတ်ပြ၊ ရှင်းပြ၊ ခွဲခြမ်းစိတ်ဖြာပေးနိုင်
 - အသုံးပြုသူက voice message ပို့ရင် စာသားအဖြစ် ပြောင်းပြီးသား ရမယ် (🎙️ tag ပါတယ်) — အဲဒီစာသားကို သာမန်စကားအတိုင်း ဖြေ
+- အသုံးပြုသူက file အဖြစ် တောင်းရင် ("file လုပ်ပေး", "txt အဖြစ်ပို့", "စာရင်းကို file နဲ့ပို့") send_file tool သုံး — စာသား/စာရင်း/အစီရင်ခံစာကို file အဖြစ် ဖန်တီးပြီး attachment နဲ့ တိုက်ရိုက်ပို့ပေး
 - Emoji ကို သင့်တော်သလောက်ပဲ သုံး`;
 
 function buildSystemPrompt(tgId) {
@@ -114,6 +115,7 @@ async function chat(tgId, userText, photoFile) {
   const messages = buildChatMessages(config.dataDir, buildSystemPrompt(tgId), history, cur.content, cur.photo);
 
   let finalText = '';
+  const files = [];
   try {
     for (let i = 0; i < 5; i++) {
       const msg = await callModel(apiCfg, messages, toolDefs);
@@ -127,7 +129,11 @@ async function chat(tgId, userText, photoFile) {
         let args = {};
         try { args = JSON.parse(c.function.arguments || '{}'); } catch (e) {}
         const out = await runTool(c.function.name, args, tgId);
-        messages.push({ role: 'tool', tool_call_id: c.id, content: String(out) });
+        const outText = (out && typeof out === 'object') ? out.text : String(out);
+        if (out && out.attachment && files.length < MAX_FILES_PER_TURN) {
+          files.push(out.attachment);
+        }
+        messages.push({ role: 'tool', tool_call_id: c.id, content: outText });
       }
     }
   } catch (e) {
@@ -140,7 +146,7 @@ async function chat(tgId, userText, photoFile) {
   if (!finalText) finalText = 'တစ်ခုခု မှားသွားတယ်၊ ထပ်စမ်းကြည့်ပါ။';
   db.addMessage(tgId, 'assistant', finalText);
   db.bumpUsage(tgId);
-  return { text: finalText };
+  return { text: finalText, files };
 }
 
 module.exports = { chat, probeApi, buildChatMessages };

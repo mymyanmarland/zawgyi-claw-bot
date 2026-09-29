@@ -31,6 +31,7 @@
 | 🔁 | **Recurring cron jobs** — `/cron` or just ask ("နေ့တိုင်းမနက် ၈နာရီ သတိပေး") |
 | 🖼 | **Photo understanding** — send a picture, Zaw Gyi sees it (vision model) |
 | 🎙️ | **Voice messages** — send a voice note, Zaw Gyi transcribes it locally (faster-whisper) and replies |
+| 📎 | **File attachments** — ask for a file ("file လုပ်ပေး"), Zaw Gyi creates it and sends it as a Telegram document |
 | 🆓 | **Freemium** — free tier: 100 AI messages / user / day |
 | 👑 | **Admin tools** — `/stats`, `/broadcast` (owner only) |
 
