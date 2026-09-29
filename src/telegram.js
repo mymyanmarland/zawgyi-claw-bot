@@ -325,7 +325,7 @@ function createBot() {
       const em = e.message || '';
       if (/abort|timeout/i.test(em)) {
         await ctx.reply(
-          '⏳ AI server က တုံ့ပြန်တာ ကြာလွန်းလို့ ရပ်လိုက်ရတယ်။\n\n' +
+          '⏳ AI server က တုံ့ပြန်တာ ကြာလွန်းလို့ ရပ်လိုက်ရတယ် (စက္ကန့် ၂၀၀ ကျော်)။\n\n' +
           'ဖြစ်နိုင်တဲ့ အကြောင်းရင်းများ:\n' +
           '• တောင်းထားတဲ့ file/စာ ရှည်လွန်းနေတာ\n' +
           '• AI server အခု အားနည်းနေတာ\n\n' +

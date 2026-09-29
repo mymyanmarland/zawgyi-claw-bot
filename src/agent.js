@@ -48,7 +48,7 @@ async function callModel(apiCfg, messages, tools) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000), // long generations (files) need time
+    signal: AbortSignal.timeout(200000), // long generations (files) need time
   });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
