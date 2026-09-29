@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520">
+  <defs>
+    <linearGradient id="dbg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <style>
+      .msg { animation: msgin 0.9s cubic-bezier(.2,.8,.2,1) both; }
+      .m1 { animation-delay: 0.3s; } .m2 { animation-delay: 1.1s; }
+      .m3 { animation-delay: 1.9s; } .m4 { animation-delay: 2.7s; }
+      @keyframes msgin { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+      .typingdot { animation: tbounce 1.2s ease-in-out infinite; }
+      .d2 { animation-delay: 0.2s; } .d3 { animation-delay: 0.4s; }
+      @keyframes tbounce { 0%,100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-5px); opacity: 1; } }
+    </style>
+  </defs>
+  <rect width="1200" height="520" rx="20" fill="url(#dbg)"/>
+  <text x="600" y="44" text-anchor="middle" font-size="22" font-weight="700" fill="#e2e8f0" font-family="system-ui, sans-serif">💬 Live demo — @zawgyiclawbot</text>
+
+  <!-- phone frame -->
+  <g font-family="system-ui, sans-serif">
+    <rect x="380" y="70" width="440" height="420" rx="28" fill="#0b1120" stroke="#334155" stroke-width="2"/>
+    <rect x="380" y="70" width="440" height="64" rx="28" fill="#1e293b"/>
+    <rect x="380" y="110" width="440" height="24" fill="#1e293b"/>
+    <text x="440" y="108" font-size="34">🧙‍♂️</text>
+    <text x="486" y="100" font-size="18" font-weight="700" fill="#f1f5f9">Zaw Gyi Claw Bot</text>
+    <text x="486" y="122" font-size="13" fill="#4ade80">● online</text>
+
+    <!-- user msg -->
+    <g class="msg m1">
+      <rect x="560" y="152" width="236" height="52" rx="14" fill="#7c3aed"/>
+      <text x="678" y="184" text-anchor="middle" font-size="16" fill="#fff">မနက်ဖြန် မိုးရွာမလား? 🌧️</text>
+    </g>
+    <!-- bot typing -->
+    <g class="msg m2">
+      <rect x="404" y="218" width="90" height="44" rx="14" fill="#1e293b"/>
+      <circle class="typingdot" cx="430" cy="240" r="5" fill="#94a3b8"/>
+      <circle class="typingdot d2" cx="449" cy="240" r="5" fill="#94a3b8"/>
+      <circle class="typingdot d3" cx="468" cy="240" r="5" fill="#94a3b8"/>
+    </g>
+    <!-- bot msg -->
+    <g class="msg m3">
+      <rect x="404" y="218" width="392" height="118" rx="14" fill="#1e293b"/>
+      <text x="420" y="248" font-size="15" fill="#e2e8f0">ရှာကြည့်ပေးမယ်… 🔍</text>
+      <text x="420" y="274" font-size="15" fill="#e2e8f0">မနက်ဖြန် ရန်ကုန် မိုးရွာနိုင်ခြေ 70%!</text>
+      <text x="420" y="300" font-size="15" fill="#e2e8f0">ထီးယူသွားဖို့ မမေ့နဲ့နော် ☂️</text>
+      <text x="776" y="328" text-anchor="end" font-size="12" fill="#64748b">10:24 ✓✓</text>
+    </g>
+    <!-- user msg 2 -->
+    <g class="msg m4">
+      <rect x="520" y="352" width="276" height="52" rx="14" fill="#7c3aed"/>
+      <text x="658" y="384" text-anchor="middle" font-size="16" fill="#fff">/remind ၁နာရီနေ ထီးယူဖို့ ⏰</text>
+    </g>
+    <!-- bot msg 2 -->
+    <g class="msg m4" style="animation-delay:3.4s">
+      <rect x="404" y="416" width="300" height="52" rx="14" fill="#1e293b"/>
+      <text x="420" y="448" font-size="15" fill="#e2e8f0">ရပြီ! ၁နာရီနေ သတိပေးမယ် ✅</text>
+    </g>
+  </g>
+
+  <!-- side notes -->
+  <g font-family="system-ui, sans-serif">
+    <text x="80" y="180" font-size="19" fill="#c4b5fd">✨ မြန်မာလို နားလည်</text>
+    <text x="80" y="220" font-size="19" fill="#c4b5fd">🔍 Web search ပါတယ်</text>
+    <text x="80" y="260" font-size="19" fill="#c4b5fd">🧠 မှတ်ဉာဏ်ရှိတယ်</text>
+    <text x="80" y="300" font-size="19" fill="#c4b5fd">⏰ သတိပေးချက်ရ</text>
+    <text x="880" y="180" font-size="19" fill="#99f6e4">🔑 ကိုယ့် API key နဲ့</text>
+    <text x="880" y="220" font-size="19" fill="#99f6e4">🔐 AES-256 လုံခြုံ</text>
+    <text x="880" y="260" font-size="19" fill="#99f6e4">🆓 အခမဲ့ စတင်</text>
+    <text x="880" y="300" font-size="19" fill="#99f6e4">🤖 Agent + Tools</text>
+  </g>
+</svg>

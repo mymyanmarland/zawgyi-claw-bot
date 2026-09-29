@@ -1,0 +1,104 @@
+// The agent loop: chat completions + tool calls against the user's OWN model API.
+const db = require('./db');
+const { decrypt } = require('./crypto');
+const { toolDefs, runTool } = require('./tools');
+const config = require('./config');
+
+const PERSONA = `မင်းနာမည်က ဇော်ဂျီ 🧙‍♂️ — အသုံးပြုသူရဲ့ ကိုယ်ပိုင် AI လက်ထောက်။
+
+စည်းမျဉ်းများ:
+- မြန်မာလို အရင်ဖြေ (အသုံးပြုသူက English လိုရေးမှ English လိုဖြေ)
+- နွေးထွေးပြီး တိုက်ရိုက် — အပိုစကားမပြောနဲ့ ("Great question!" လိုမျိုးမသုံးနဲ့)
+- ဖုန်းစခရင်နဲ့ ဖတ်လို့ရအောင် တိုတိုရှင်းရှင်း ဖြေ; လိုအပ်မှ အသေးစိတ်ရှင်း
+- ကိုယ်ပိုင်အမြင်ရှိနိုင်တယ် — စက်ရုပ်လို မဖြေနဲ့
+- မသိရင် မသိဘူးပြော; ခန့်မှန်းမဖြေနဲ့
+- လက်ရှိ သတင်း/ဈေးနှုန်း/ရာသီဥတု လိုမျိုး မေးရင် web_search tool ကို သုံး
+- အသုံးပြုသူ့အကြောင်း ရေရှည်မှတ်ထားသင့်တဲ့ အချက် (နာမည်, ကြိုက်တာ) တွေ့ရင် remember_fact သုံး
+- Emoji ကို သင့်တော်သလောက်ပဲ သုံး`;
+
+function buildSystemPrompt(tgId) {
+  const mems = db.listMemories(tgId);
+  let p = PERSONA;
+  p += `\n\nယနေ့: ${new Date().toLocaleDateString('my-MM', { timeZone: 'Asia/Yangon', dateStyle: 'full' })}`;
+  if (mems.length) {
+    p += '\n\nအသုံးပြုသူ့အကြောင်း မှတ်ထားတာများ:\n' + mems.map(m => `- [${m.id}] ${m.fact}`).join('\n');
+  }
+  return p;
+}
+
+async function callModel(apiCfg, messages, tools) {
+  const apiKey = decrypt(apiCfg.api_key_enc, config.masterKey);
+  const base = apiCfg.base_url.replace(/\/+$/, '');
+  const body = {
+    model: apiCfg.model,
+    messages,
+    temperature: 0.7,
+    max_tokens: 1500,
+  };
+  if (tools) { body.tools = tools; body.tool_choice = 'auto'; }
+  const res = await fetch(base + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Model API error ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const choice = data.choices && data.choices[0];
+  if (!choice) throw new Error('Model returned no choices');
+  return choice.message;
+}
+
+// Probe call for /testapi
+async function probeApi(baseUrl, apiKey, model) {
+  const base = baseUrl.replace(/\/+$/, '');
+  const res = await fetch(base + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 5 }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}: ${t.slice(0, 150)}`);
+  }
+  return true;
+}
+
+async function chat(tgId, userText) {
+  const apiCfg = db.getApiConfig(tgId);
+  if (!apiCfg) return { error: 'noapi' };
+
+  db.addMessage(tgId, 'user', userText);
+  const history = db.getRecentMessages(tgId, 20);
+  const messages = [
+    { role: 'system', content: buildSystemPrompt(tgId) },
+    ...history.map(m => ({ role: m.role, content: m.content })),
+  ];
+
+  let finalText = '';
+  for (let i = 0; i < 5; i++) {
+    const msg = await callModel(apiCfg, messages, toolDefs);
+    messages.push(msg);
+    const calls = msg.tool_calls || [];
+    if (!calls.length) {
+      finalText = msg.content || '';
+      break;
+    }
+    for (const c of calls) {
+      let args = {};
+      try { args = JSON.parse(c.function.arguments || '{}'); } catch (e) {}
+      const out = await runTool(c.function.name, args, tgId);
+      messages.push({ role: 'tool', tool_call_id: c.id, content: String(out) });
+    }
+  }
+  if (!finalText) finalText = 'တစ်ခုခု မှားသွားတယ်၊ ထပ်စမ်းကြည့်ပါ။';
+  db.addMessage(tgId, 'assistant', finalText);
+  db.bumpUsage(tgId);
+  return { text: finalText };
+}
+
+module.exports = { chat, probeApi };

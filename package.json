@@ -1,0 +1,14 @@
+{
+  "name": "zawgyi-claw-bot",
+  "version": "1.0.0",
+  "description": "Zaw Gyi Claw Bot — Burmese-first personal AI assistant product (BYO model API)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3",
+    "telegraf": "^4.16.3"
+  }
+}
