@@ -417,6 +417,42 @@ function createBot() {
     if (ctx.message.audio) await handleIncomingVoice(ctx, ctx.message.audio.file_id);
   });
 
+  // Menu button: register commands so Telegram clients show the "Menu"
+  // button next to the message input. Owner gets extra admin commands
+  // in their own chat scope.
+  const USER_COMMANDS = [
+    { command: 'start', description: 'စတင်ရန် / မိတ်ဆက်' },
+    { command: 'new', description: 'စကားဝိုင်း အသစ်စ' },
+    { command: 'setapi', description: 'AI Model API ချိတ်ဆက်ရန်' },
+    { command: 'testapi', description: 'API စမ်းသပ်ရန်' },
+    { command: 'myapi', description: 'ချိတ်ထားတဲ့ API ကြည့်ရန်' },
+    { command: 'removeapi', description: 'API ဖျက်ရန်' },
+    { command: 'remind', description: 'သတိပေးချက် မှတ်ရန်' },
+    { command: 'reminders', description: 'သတိပေးချက်များ ကြည့်ရန်' },
+    { command: 'cron', description: 'ထပ်တလဲလဲ သတိပေးချက် ဖန်တီးရန်' },
+    { command: 'crons', description: 'cron စာရင်း ကြည့်ရန်' },
+    { command: 'uncron', description: 'cron ဖျက်ရန်' },
+    { command: 'remember', description: 'အချက် မှတ်ထားရန်' },
+    { command: 'memory', description: 'မှတ်ထားတာများ ကြည့်ရန်' },
+    { command: 'forget', description: 'မှတ်ထားတာ ဖျက်ရန်' },
+    { command: 'help', description: 'အကူအညီ / command အားလုံး' },
+  ];
+  bot.telegram.setMyCommands(USER_COMMANDS).catch((e) =>
+    console.error('setMyCommands failed:', e.message)
+  );
+  if (config.ownerId) {
+    const ownerId = parseInt(config.ownerId, 10);
+    if (ownerId) {
+      const OWNER_COMMANDS = USER_COMMANDS.concat([
+        { command: 'stats', description: '👑 အသုံးပြုသူ စာရင်းအင်း' },
+        { command: 'broadcast', description: '👑 အားလုံးကို စာပို့ရန်' },
+      ]);
+      bot.telegram
+        .setMyCommands(OWNER_COMMANDS, { type: 'chat', chat_id: ownerId })
+        .catch((e) => console.error('setMyCommands (owner) failed:', e.message));
+    }
+  }
+
   return bot;
 }
 
