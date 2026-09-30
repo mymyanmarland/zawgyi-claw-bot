@@ -16,4 +16,8 @@ module.exports = {
   serperKey: process.env.SERPER_API_KEY || '', // optional: Serper Google API (free 2500 queries, no card) as search backend
   botName: 'Zaw Gyi',
   botEmoji: '🧙‍♂️',
+  // Hindsight long-term memory (optional, fail-open). Server runs on the VPS
+  // at 127.0.0.1:8888; set HINDSIGHT_ENABLED=1 to turn recall/retain on.
+  hindsightUrl: process.env.HINDSIGHT_URL || 'http://127.0.0.1:8888',
+  hindsightEnabled: process.env.HINDSIGHT_ENABLED === '1',
 };

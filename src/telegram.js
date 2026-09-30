@@ -10,6 +10,7 @@ const { saveTelegramDocument, extractText, supportedExt } = require('./documents
 const { validateBaseUrl } = require('./ssrf');
 const { createOutboxFile } = require('./tools');
 const config = require('./config');
+const hs = require('./hindsight');
 
 const NOAPI_MSG = `🔌 **Model API မချိတ်ရသေးပါ**
 
@@ -136,6 +137,7 @@ function createBot() {
       `🧠 /remember <အချက်> — မှတ်ထားရန်\n` +
       `📋 /memory — မှတ်ထားတာတွေ ကြည့်ရန်\n` +
       `❌ /forget <id> — မေ့ခိုင်းရန်\n` +
+      `🧹 /forgetall — အလိုအလျောက် မှတ်ဉာဏ်ထဲက အကုန်ဖျက်ရန်\n` +
       `⏰ /remind <အချိန်> <စာ> — သတိပေးချက်\n` +
       `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်\n` +
       `🔁 /cron <expression> <စာ> — ထပ်တလဲလဲ သတိပေးချက်\n` +
@@ -230,6 +232,13 @@ function createBot() {
     }
     const n = db.deleteMemoryByText(tgId, arg);
     await ctx.reply(n ? `❌ ${n} ခု မေ့လိုက်ပြီ။` : 'မတွေ့ပါ။');
+  });
+
+  bot.command('forgetall', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    if (!hs.enabled()) return ctx.reply('🧠 အလိုအလျောက် မှတ်ဉာဏ် (Hindsight) ပိတ်ထားပါတယ်။');
+    const ok = await hs.forgetAll(tgId);
+    await ctx.reply(ok ? '🧠 အလိုအလျောက် မှတ်ဉာဏ်ထဲက မှတ်ထားသမျှ အကုန် ဖျက်ပြီးပြီ။' : '⚠️ ဖျက်မရခဲ့ပါ။ နောက်မှ ထပ်စမ်းပါ။');
   });
 
   bot.command('remind', async (ctx) => {
@@ -657,6 +666,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     { command: 'remember', description: 'အချက် မှတ်ထားရန်' },
     { command: 'memory', description: 'မှတ်ထားတာများ ကြည့်ရန်' },
     { command: 'forget', description: 'မှတ်ထားတာ ဖျက်ရန်' },
+    { command: 'forgetall', description: 'အလိုအလျောက်မှတ်ဉာဏ် အကုန်ဖျက်ရန်' },
     { command: 'help', description: 'အကူအညီ / command အားလုံး' },
   ];
   bot.telegram.setMyCommands(USER_COMMANDS).catch((e) =>

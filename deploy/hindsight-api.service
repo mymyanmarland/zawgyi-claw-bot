@@ -1,0 +1,21 @@
+[Unit]
+Description=Hindsight API — agent long-term memory server (Zaw Gyi Claw Bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hindsight
+Group=hindsight
+WorkingDirectory=/opt/hindsight
+Environment=HOME=/opt/hindsight
+Environment=HF_HUB_OFFLINE=0
+EnvironmentFile=/opt/hindsight/.env
+ExecStart=/opt/hindsight/bin/hindsight-api --host 127.0.0.1 --port 8888 --log-level info
+Restart=always
+RestartSec=10
+# RAM guard: full image idles ~0.8-1GB; VPS has 3.9GB total
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

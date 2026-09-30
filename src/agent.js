@@ -5,6 +5,7 @@ const { toolDefs, runTool, MAX_FILES_PER_TURN } = require('./tools');
 const { photoDataUrl } = require('./photos');
 const { assertSafeUrlSync } = require('./ssrf');
 const config = require('./config');
+const hs = require('./hindsight');
 
 // How many recent photo messages keep their image attached in history (bounds payload size).
 const HISTORY_PHOTOS = 3;
@@ -27,12 +28,15 @@ const PERSONA = `မင်းနာမည်က ဇော်ဂျီ 🧙‍♂
 - အသုံးပြုသူက file အဖြစ် တောင်းရင် ("file လုပ်ပေး", "txt အဖြစ်ပို့", "စာရင်းကို file နဲ့ပို့") send_file tool သုံး — စာသား/စာရင်း/အစီရင်ခံစာကို file အဖြစ် ဖန်တီးပြီး attachment နဲ့ တိုက်ရိုက်ပို့ပေး
 - Emoji ကို သင့်တော်သလောက်ပဲ သုံး`;
 
-function buildSystemPrompt(tgId) {
+function buildSystemPrompt(tgId, hsMemories) {
   const mems = db.listMemories(tgId);
   let p = PERSONA;
   p += `\n\nယနေ့: ${new Date().toLocaleDateString('my-MM', { timeZone: 'Asia/Yangon', dateStyle: 'full' })}`;
   if (mems.length) {
     p += '\n\nအသုံးပြုသူ့အကြောင်း မှတ်ထားတာများ:\n' + mems.map(m => `- [${m.id}] ${m.fact}`).join('\n');
+  }
+  if (hsMemories) {
+    p += '\n\n🧠 အတိတ်စကားဝိုင်းများမှ ဆက်စပ်မှတ်ဉာဏ်:\n' + hsMemories;
   }
   return p;
 }
@@ -214,7 +218,9 @@ async function chat(tgId, userText, photoFile, onToken) {
   const history = db.getRecentMessages(tgId, 20);
   // last row is the message we just added — build it as the current turn
   const cur = history.pop();
-  const messages = buildChatMessages(config.dataDir, buildSystemPrompt(tgId), history, cur.content, cur.photo);
+  // Hindsight long-term memory: semantically relevant past memories for this turn (fail-open).
+  const hsMemories = await hs.recallForPrompt(tgId, cur.content);
+  const messages = buildChatMessages(config.dataDir, buildSystemPrompt(tgId, hsMemories), history, cur.content, cur.photo);
 
   let finalText = '';
   const files = [];
@@ -257,6 +263,8 @@ async function chat(tgId, userText, photoFile, onToken) {
   }
   if (!finalText) finalText = 'တစ်ခုခု မှားသွားတယ်၊ ထပ်စမ်းကြည့်ပါ။';
   db.addMessage(tgId, 'assistant', finalText);
+  // Hindsight: retain this turn's exchange for future recall (fire-and-forget).
+  hs.retainTurn(tgId, cur.content, finalText);
   db.bumpUsage(tgId);
   db.addTokenUsage(tgId, totalUsage);
   return { text: finalText, files };
