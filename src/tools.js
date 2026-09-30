@@ -83,6 +83,30 @@ function unwrapDdg(href) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// --- Serper: Google results via API, free 2500 queries on signup (no card) ---
+async function serperSearch(query) {
+  const key = config.serperKey;
+  if (!key) return null;
+  const res = await fetch('https://google.serper.dev/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
+    body: JSON.stringify({ q: query, num: MAX_SEARCH_RESULTS }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error('serper ' + res.status);
+  const j = await res.json();
+  const items = (j && j.organic) || [];
+  const out = [];
+  for (const r of items) {
+    const title = String(r.title || '').slice(0, 150);
+    const link = String(r.link || '');
+    const snippet = String(r.snippet || '').slice(0, 250);
+    if (title && /^https?:\/\//i.test(link)) out.push({ title, url: link, snippet });
+    if (out.length >= MAX_SEARCH_RESULTS) break;
+  }
+  return out;
+}
+
 // --- Brave Search API: independent index, used when BRAVE_SEARCH_API_KEY is set ---
 async function braveSearch(query) {
   const key = config.braveSearchKey;
@@ -124,7 +148,12 @@ async function ddgHtmlFetch(q) {
 async function webSearch(query) {
   const q = (query || '').trim();
   if (!q) return '❌ ရှာမယ့် စကားလုံး မပါဘူး။';
-  // Backend 1: Brave Search API (own index) when a key is configured.
+  // Backend 1: Serper (Google results, free 2500 queries) when a key is configured.
+  try {
+    const s = await serperSearch(q);
+    if (s && s.length) return formatResults(s);
+  } catch (e) { /* fall through */ }
+  // Backend 2: Brave Search API (own index) when a key is configured.
   try {
     const b = await braveSearch(q);
     if (b && b.length) return formatResults(b);
