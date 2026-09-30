@@ -12,6 +12,7 @@ module.exports = {
   masterKey: required('ZAWGYI_MASTER_KEY', undefined), // 64-hex chars (32 bytes)
   dataDir: process.env.DATA_DIR || './data',
   dailyLimit: parseInt(process.env.DAILY_LIMIT || '100', 10),
+  braveSearchKey: process.env.BRAVE_SEARCH_API_KEY || '', // optional: Brave Search API (free 2000/mo) as primary web index
   botName: 'Zaw Gyi',
   botEmoji: '🧙‍♂️',
 };

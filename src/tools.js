@@ -83,6 +83,34 @@ function unwrapDdg(href) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// --- Brave Search API: independent index, used when BRAVE_SEARCH_API_KEY is set ---
+async function braveSearch(query) {
+  const key = config.braveSearchKey;
+  if (!key) return null;
+  const url = 'https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(query) +
+    '&count=' + MAX_SEARCH_RESULTS + '&safesearch=moderate&text_decorations=false';
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json', 'X-Subscription-Token': key },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error('brave ' + res.status);
+  const j = await res.json();
+  const items = (j && j.web && j.web.results) || [];
+  const out = [];
+  for (const r of items) {
+    const title = String(r.title || '').slice(0, 150);
+    const link = String(r.url || '');
+    const snippet = String(r.description || '').slice(0, 250);
+    if (title && /^https?:\/\//i.test(link)) out.push({ title, url: link, snippet });
+    if (out.length >= MAX_SEARCH_RESULTS) break;
+  }
+  return out;
+}
+
+function formatResults(results) {
+  return results.map((r, n) => `${n + 1}. ${r.title}\n   ${r.snippet || ''}\n   ${r.url}`).join('\n\n');
+}
+
 async function ddgHtmlFetch(q) {
   const url = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(q);
   const res = await fetch(url, {
@@ -96,6 +124,12 @@ async function ddgHtmlFetch(q) {
 async function webSearch(query) {
   const q = (query || '').trim();
   if (!q) return '❌ ရှာမယ့် စကားလုံး မပါဘူး။';
+  // Backend 1: Brave Search API (own index) when a key is configured.
+  try {
+    const b = await braveSearch(q);
+    if (b && b.length) return formatResults(b);
+  } catch (e) { /* fall through to DuckDuckGo */ }
+  // Backend 2: DuckDuckGo HTML (free, no key).
   // DDG sometimes serves a bot-check page (anomaly-modal) to server IPs.
   // It is transient — retry with backoff instead of giving up.
   let html = null;
@@ -130,7 +164,7 @@ async function webSearch(query) {
     i++;
   }
   if (!results.length) return 'ရှာမတွေ့ပါ။ (စကားလုံးပြောင်းပြီး ထပ်စမ်းကြည့်ပါ)';
-  return results.map((r, n) => `${n + 1}. ${r.title}\n   ${r.snippet || ''}\n   ${r.url}`).join('\n\n');
+  return formatResults(results);
 }
 
 // --- open_link: fetch a search result page as readable text ---
@@ -190,7 +224,7 @@ const toolDefs = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Search the web for current/news information. Returns up to 8 results with title, snippet and URL. Use when the user asks about recent events, prices, weather, links, or anything you might not know. If results are thin, retry with different query wording. If you get a rate-limit/connection error, call web_search again with a reworded query — never tell the user search is unavailable without retrying first.',
+      description: 'Search the web across multiple search sources for current/news information. Returns up to 8 results with title, snippet and URL. Use when the user asks about recent events, prices, weather, links, or anything you might not know. If results are thin, retry with different query wording. If you get a rate-limit/connection error, call web_search again with a reworded query — never tell the user search is unavailable without retrying first.',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string', description: 'Search query' } },
