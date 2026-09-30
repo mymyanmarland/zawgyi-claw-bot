@@ -419,20 +419,25 @@ async function runTool(name, args, tgId) {
     if (name === 'generate_image') {
       const imagine = require('./imagine');
       const owner = config.ownerId && String(tgId) === String(config.ownerId);
-      // Policy: needs the user's OWN approved-relay API key (via /setapi).
-      // The owner may use the server relay key.
-      let apiKey = null;
+      // Imagine tiers: owner → server key, unlimited; user with OWN approved-relay
+      // key (/setapi sapi.zly168.cn/v1) → their key, 10/day; everyone else → free
+      // tier on the server key, 5/day.
+      const userKey = owner ? null : imagine.userRelayKey(tgId);
+      let apiKey;
       if (owner) {
         if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
         apiKey = config.imagineKey;
+      } else if (userKey) {
+        apiKey = userKey;
       } else {
-        apiKey = imagine.userRelayKey(tgId);
-        if (!apiKey) {
-          return '🎨 ဒီအသုံးပြုသူ ပုံထုတ်ခွင့်မရှိသေးဘူး — /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key အရင်ထည့်ဖို့ ပြောပြပါ: `/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။';
-        }
+        if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
+        apiKey = config.imagineKey;
       }
-      if (db.getImagineUsage(tgId) >= config.imagineDailyLimit && !owner) {
-        return `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`;
+      const imgLimit = owner ? Infinity : (userKey ? config.imagineDailyLimit : config.freeImagineLimit);
+      if (!owner && db.getImagineUsage(tgId) >= imgLimit) {
+        return userKey
+          ? `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${imgLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`
+          : `⏳ ဒီနေ့ အခမဲ့ ပုံထုတ် limit (${imgLimit}) ပြည့်သွားပြီ 🙏 — ဆက်ထုတ်ချင်ရင် /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key ထည့်ဖို့ အသုံးပြုသူကို ပြောပြပါ: \`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>\` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။`;
       }
       const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId, apiKey });
       if (r.error) return '❌ ' + imagine.errorText(r.error, r.detail);

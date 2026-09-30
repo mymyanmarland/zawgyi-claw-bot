@@ -12,6 +12,9 @@ module.exports = {
   masterKey: required('ZAWGYI_MASTER_KEY', undefined), // 64-hex chars (32 bytes)
   dataDir: process.env.DATA_DIR || './data',
   dailyLimit: parseInt(process.env.DAILY_LIMIT || '100', 10),
+  // Free tier for users WITHOUT their own /setapi key: funded by the owner's key.
+  freeChatLimit: parseInt(process.env.FREE_CHAT_LIMIT || '50', 10),
+  freeImagineLimit: parseInt(process.env.FREE_IMAGINE_LIMIT || '5', 10),
   braveSearchKey: process.env.BRAVE_SEARCH_API_KEY || '', // optional: Brave Search API (paid, $5/mo credits) as search backend
   serperKey: process.env.SERPER_API_KEY || '', // optional: Serper Google API (free 2500 queries, no card) as search backend
   botName: 'Zaw Gyi',

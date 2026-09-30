@@ -237,8 +237,14 @@ function buildChatMessages(dataDir, systemPrompt, history, curText, curPhoto) {
 }
 
 async function chat(tgId, userText, photoFile, onToken) {
-  const apiCfg = db.getApiConfig(tgId);
-  if (!apiCfg) return { error: 'noapi' };
+  let apiCfg = db.getApiConfig(tgId);
+  if (!apiCfg) {
+    // Free tier: users without their own /setapi key chat on the owner's
+    // API config (freeChatLimit/day). briefing()/crons stay key-only.
+    const ownerCfg = config.ownerId ? db.getApiConfig(String(config.ownerId)) : null;
+    if (!ownerCfg) return { error: 'noapi' };
+    apiCfg = ownerCfg;
+  }
 
   db.addMessage(tgId, 'user', userText, photoFile || null);
   const history = db.getRecentMessages(tgId, 20);
