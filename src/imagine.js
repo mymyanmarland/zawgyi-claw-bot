@@ -65,31 +65,47 @@ async function generateImage(prompt, opts = {}) {
   const size = SIZE_MAP[opts.aspect] || SIZE_MAP.square;
 
   let remoteUrl = null;
-  try {
-    const r = await fetch(base + '/images/generations', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ model, prompt: p, size }),
-      signal: AbortSignal.timeout(180000),
-    });
-    const text = await r.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch (e) { /* non-JSON */ }
-    if (!r.ok) {
-      const msg = (data && (data.error && (data.error.message || data.error))) || text.slice(0, 160);
-      return { error: 'relay_' + r.status, detail: String(msg).slice(0, 200) };
+  let lastError = null;
+  // The relay's upstream is intermittently flaky (5xx / slow). Retry transient
+  // failures a few times with backoff before giving up.
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const r = await fetch(base + '/images/generations', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model, prompt: p, size }),
+        signal: AbortSignal.timeout(120000),
+      });
+      const text = await r.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (e) { /* non-JSON */ }
+      if (!r.ok) {
+        const msg = (data && (data.error && (data.error.message || data.error))) || text.slice(0, 160);
+        lastError = { error: 'relay_' + r.status, detail: String(msg).slice(0, 200) };
+        // Retry on 429 / 5xx (transient). Other statuses are final.
+        if (!(r.status === 429 || (r.status >= 500 && r.status < 600))) return lastError;
+      } else {
+        const item = data && data.data && data.data[0];
+        remoteUrl =
+          item && (item.url || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : null));
+        if (!remoteUrl) return { error: 'no_image' };
+        lastError = null;
+        break;
+      }
+    } catch (e) {
+      if (e.name === 'TimeoutError' || e.name === 'AbortError') lastError = { error: 'timeout' };
+      else lastError = { error: 'fetch_failed', detail: String(e.message).slice(0, 160) };
     }
-    const item = data && data.data && data.data[0];
-    remoteUrl =
-      item && (item.url || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : null));
-    if (!remoteUrl) return { error: 'no_image' };
-  } catch (e) {
-    if (e.name === 'TimeoutError' || e.name === 'AbortError') return { error: 'timeout' };
-    return { error: 'fetch_failed', detail: String(e.message).slice(0, 160) };
+    if (attempt < MAX_ATTEMPTS) {
+      console.error(`[imagine] attempt ${attempt} failed (${lastError && lastError.error}), retrying...`);
+      await new Promise((r) => setTimeout(r, attempt === 1 ? 8000 : 20000));
+    }
   }
+  if (!remoteUrl) return lastError || { error: 'no_image' };
 
   // Download to a local file so Telegram can send it as a photo.
   try {
