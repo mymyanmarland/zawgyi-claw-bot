@@ -359,13 +359,12 @@ const toolDefs = [
     type: 'function',
     function: {
       name: 'generate_image',
-      description: 'Generate an AI image from a text prompt and send it to the user as a photo. Use when the user asks for a picture/image ("ပုံထုတ်ပေး", "ပုံဆွဲပေး", "draw...", "image of..."). Write the prompt in English (translate the user\'s Burmese description yourself). Aspect: square (default), portrait, landscape, wide. Model: "grok" (default, via Relay 1) or "gpt" (gpt-image-2 via Relay 2 RelayModels).',
+      description: 'Generate an AI image from a text prompt and send it to the user as a photo. Use when the user asks for a picture/image ("ပုံထုတ်ပေး", "ပုံဆွဲပေး", "draw...", "image of..."). Write the prompt in English (translate the user\'s Burmese description yourself). Aspect: square (default), portrait, landscape, wide.',
       parameters: {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'Image description in English, e.g. "Shwedagon Pagoda at sunset, golden light, photorealistic"' },
           aspect: { type: 'string', description: 'square, portrait, landscape or wide', enum: ['square', 'portrait', 'landscape', 'wide'] },
-          model: { type: 'string', description: '"grok" (default) or "gpt" for gpt-image-2', enum: ['grok', 'gpt'] },
         },
         required: ['prompt'],
       },
@@ -420,27 +419,22 @@ async function runTool(name, args, tgId) {
     if (name === 'generate_image') {
       const imagine = require('./imagine');
       const owner = config.ownerId && String(tgId) === String(config.ownerId);
-      const wantGpt = String(args.model || '').toLowerCase() === 'gpt';
       // Policy: needs the user's OWN approved-relay API key (via /setapi).
-      // The owner may use the server relay keys (Relay 1 Grok / Relay 2 RelayModels).
-      let creds = null;
+      // The owner may use the server relay key.
+      let apiKey = null;
       if (owner) {
-        creds = imagine.ownerRelay(wantGpt ? 'gpt-image-2' : '');
-        if (!creds) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
+        if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
+        apiKey = config.imagineKey;
       } else {
-        const u = imagine.userRelay(tgId);
-        if (!u) {
-          return '🎨 ဒီအသုံးပြုသူ ပုံထုတ်ခွင့်မရှိသေးဘူး — /setapi မှာ ခွင့်ပြုထားတဲ့ relay ၂ ခုထဲက တစ်ခုရဲ့ API key အရင်ထည့်ဖို့ ပြောပြပါ (private chat မှာ သုံးရမယ်): `/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>` (Grok) ဒါမှမဟုတ် `/setapi https://api.relaymodels.com/v1 <API_KEY> gpt-image-2` (GPT)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။';
+        apiKey = imagine.userRelayKey(tgId);
+        if (!apiKey) {
+          return '🎨 ဒီအသုံးပြုသူ ပုံထုတ်ခွင့်မရှိသေးဘူး — /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key အရင်ထည့်ဖို့ ပြောပြပါ: `/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။';
         }
-        if (wantGpt && u.base !== imagine.RELAY_2) {
-          return '🎨 gpt-image-2 က RelayModels relay key နဲ့မှ ရမယ် — `/setapi https://api.relaymodels.com/v1 <API_KEY> gpt-image-2` နဲ့ ချိတ်ထားဖို့ အသုံးပြုသူကို ပြောပြပါ။';
-        }
-        creds = { apiKey: u.key, base: u.base, model: wantGpt ? 'gpt-image-2' : imagine.defaultModel(u.base) };
       }
       if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
         return `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`;
       }
-      const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId, apiKey: creds.apiKey, base: creds.base, model: creds.model });
+      const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId, apiKey });
       if (r.error) return '❌ ' + imagine.errorText(r.error, r.detail);
       db.bumpImagineUsage(tgId);
       return {

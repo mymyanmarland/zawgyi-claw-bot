@@ -1,26 +1,8 @@
-// AI image generation via approved OpenAI-compatible relays.
-// Server-side only: relay keys never leave the VPS and are never sent to Telegram.
-//
-// Two approved relays (same allowlist as OceanCanvas):
-//   Relay 1 · https://sapi.zly168.cn/v1        → grok-imagine-image, grok-imagine-image-2.0
-//   Relay 2 · https://api.relaymodels.com/v1  → gpt-image-2
+// AI image generation via an OpenAI-compatible relay (grok-imagine-image models).
+// Server-side only: the relay key never leaves the VPS and is never sent to Telegram.
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-
-const RELAY_1 = 'https://sapi.zly168.cn/v1';
-const RELAY_2 = 'https://api.relaymodels.com/v1';
-
-// Policy: image generation is ONLY allowed through these approved relays.
-// Any other endpoint disables the feature.
-const APPROVED_RELAYS = [RELAY_1, RELAY_2];
-
-// Which models belong to which relay. The server routes each generation to
-// the relay that owns the chosen model.
-const RELAY_MODELS = {
-  [RELAY_1]: ['grok-imagine-image', 'grok-imagine-image-2.0'],
-  [RELAY_2]: ['gpt-image-2'],
-};
 
 const SIZE_MAP = {
   square: '1024x1024',
@@ -29,71 +11,42 @@ const SIZE_MAP = {
   wide: '1920x1080',
 };
 
-// gpt-image-2 only supports 1024x1024 / 1024x1536 / 1536x1024.
-const GPT_SIZE_MAP = {
-  square: '1024x1024',
-  portrait: '1024x1536',
-  landscape: '1536x1024',
-  wide: '1536x1024',
-};
+// Policy: image generation is ONLY allowed through the approved relay.
+// Any other endpoint (e.g. via RELAY_IMAGE_BASE override) disables the feature.
+const APPROVED_RELAY = 'https://sapi.zly168.cn/v1';
 
-function normBase(b) {
-  return String(b || '').trim().replace(/\/+$/, '').toLowerCase();
+function relayBase() {
+  const b = String(config.imagineBase || '').trim().replace(/\/+$/, '').toLowerCase();
+  if (b === APPROVED_RELAY) return APPROVED_RELAY;
+  if (config.imagineBase) {
+    console.warn('[imagine] RELAY_IMAGE_BASE is not the approved relay — image generation DISABLED');
+  }
+  return null;
 }
 
-// Normalize + check a base URL against the approved relay allowlist.
+function configured() {
+  return !!(config.imagineKey && relayBase());
+}
+
+// Normalize + check a base URL against the approved relay.
 function approvedBase(baseUrl) {
-  return APPROVED_RELAYS.includes(normBase(baseUrl));
+  return String(baseUrl || '').trim().replace(/\/+$/, '').toLowerCase() === APPROVED_RELAY;
 }
 
-// Default model for a relay (Relay 1 honors the server-configured model).
-function defaultModel(base) {
-  const b = normBase(base);
-  if (b === RELAY_2) return 'gpt-image-2';
-  return config.imagineModel || 'grok-imagine-image';
-}
-
-function sizeFor(model, aspect) {
-  const map = model === 'gpt-image-2' ? GPT_SIZE_MAP : SIZE_MAP;
-  return map[aspect] || map.square;
-}
-
-// The Telegram user's OWN relay API (from /setapi), usable for image
-// generation only when their configured endpoint is an approved relay.
-// Returns { key, base }, or null.
-function userRelay(tgId) {
+// The Telegram user's OWN relay API key (from /setapi), usable for image
+// generation only when their configured endpoint is the approved relay.
+// Returns the decrypted key, or null.
+function userRelayKey(tgId) {
   try {
     const db = require('./db');
     const { decrypt } = require('./crypto');
     const cfg = db.getApiConfig(String(tgId));
     if (!cfg || !approvedBase(cfg.base_url)) return null;
     const key = decrypt(cfg.api_key_enc, config.masterKey);
-    if (!key) return null;
-    return { key, base: normBase(cfg.base_url) };
+    return key || null;
   } catch (e) {
     return null;
   }
-}
-
-// Server-side relay for the owner. `model` may be 'gpt-image-2' to force
-// Relay 2; anything else (or empty) uses Relay 1. Returns
-// { base, key, model }, or null when that relay is not configured.
-function ownerRelay(model) {
-  const m = String(model || '').trim().toLowerCase();
-  if (m === 'gpt-image-2') {
-    if (!config.imagineKey2 || !approvedBase(config.imagineBase2)) return null;
-    return { base: normBase(config.imagineBase2), key: config.imagineKey2, model: 'gpt-image-2' };
-  }
-  const base = normBase(config.imagineBase);
-  if (!config.imagineKey || !approvedBase(base)) {
-    if (config.imagineBase) console.warn('[imagine] RELAY_IMAGE_BASE is not an approved relay — Relay 1 DISABLED');
-    return null;
-  }
-  return { base, key: config.imagineKey, model: defaultModel(base) };
-}
-
-function configured() {
-  return !!(ownerRelay() || ownerRelay('gpt-image-2'));
 }
 
 function imagineDir(tgId) {
@@ -102,19 +55,14 @@ function imagineDir(tgId) {
   return d;
 }
 
-// opts: { tgId, apiKey, base, model, aspect }
-// `base` is required and must be an approved relay; the model must belong
-// to that relay (unknown/mismatched models are rejected, never guessed).
 async function generateImage(prompt, opts = {}) {
   const p = String(prompt || '').trim().slice(0, 1000);
   if (!p) return { error: 'empty_prompt' };
-  const base = normBase(opts.base);
-  if (!approvedBase(base)) return { error: 'not_configured' };
-  const apiKey = opts.apiKey;
-  if (!apiKey) return { error: 'not_configured' };
-  const model = opts.model || defaultModel(base);
-  if (!(RELAY_MODELS[base] || []).includes(model)) return { error: 'model_not_supported' };
-  const size = sizeFor(model, opts.aspect);
+  const base = relayBase();
+  const apiKey = opts.apiKey || config.imagineKey;
+  if (!apiKey || !base) return { error: 'not_configured' };
+  const model = opts.model || config.imagineModel;
+  const size = SIZE_MAP[opts.aspect] || SIZE_MAP.square;
 
   let remoteUrl = null;
   try {
@@ -146,11 +94,10 @@ async function generateImage(prompt, opts = {}) {
   // Download to a local file so Telegram can send it as a photo.
   try {
     const dir = imagineDir(opts.tgId);
-    const isB64 = remoteUrl.startsWith('data:');
-    const name = 'imagine-' + Date.now() + (isB64 ? '.png' : '.jpg');
+    const name = 'imagine-' + Date.now() + '.jpg';
     const full = path.join(dir, name);
     let buf;
-    if (isB64) {
+    if (remoteUrl.startsWith('data:')) {
       buf = Buffer.from(remoteUrl.split(',')[1] || '', 'base64');
     } else {
       const r = await fetch(remoteUrl, { signal: AbortSignal.timeout(120000) });
@@ -169,7 +116,7 @@ async function generateImage(prompt, opts = {}) {
         try { fs.unlinkSync(path.join(dir, f)); } catch (e) {}
       }
     } catch (e) {}
-    return { path: full, name, prompt: p, model };
+    return { path: full, name, prompt: p };
   } catch (e) {
     return { error: 'download_failed', detail: String(e.message).slice(0, 160) };
   }
@@ -193,8 +140,7 @@ function errorText(code, detail) {
   const d = translateRelayDetail(detail);
   switch (code) {
     case 'empty_prompt': return 'ပုံအတွက် ဖော်ပြချက် (prompt) မပါဘူး။';
-    case 'not_configured': return 'ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (ခွင့်ပြုထားတဲ့ relay ၂ ခုမှတစ်ဆင့်သာ ပုံထုတ်လို့ရတယ်)။';
-    case 'model_not_supported': return 'ရွေးထားတဲ့ relay မှာ ဒီ model မရဘူး။';
+    case 'not_configured': return 'ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (ခွင့်ပြုထားတဲ့ relay မှတစ်ဆင့်သာ ပုံထုတ်လို့ရတယ်)။';
     case 'no_image': return 'relay က ပုံ ပြန်မပေးဘူး။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
     case 'timeout': return 'ပုံထုတ်တာ ကြာလွန်းလို့ ရပ်လိုက်ရတယ်။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
     case 'fetch_failed': return 'relay ဆာဗာကို ချိတ်မရဘူး' + (d ? `: ${d}` : '') + '။';
@@ -218,10 +164,4 @@ function errorText(code, detail) {
   }
 }
 
-module.exports = {
-  generateImage, configured, errorText, approvedBase,
-  userRelay, ownerRelay, defaultModel, sizeFor,
-  APPROVED_RELAYS, RELAY_MODELS, RELAY_1, RELAY_2,
-  // kept for backward compatibility
-  SIZE_MAP, APPROVED_RELAY: RELAY_1, userRelayKey: (tgId) => { const r = userRelay(tgId); return r ? r.key : null; },
-};
+module.exports = { generateImage, configured, errorText, SIZE_MAP, approvedBase, userRelayKey, APPROVED_RELAY };

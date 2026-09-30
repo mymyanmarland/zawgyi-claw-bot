@@ -334,56 +334,38 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
 
   bot.command('imagine', async (ctx) => {
     const tgId = String(ctx.from.id);
-    let prompt = ctx.message.text.replace(/^\/imagine(@\w+)?\s+/, '').trim();
-    const usageLine = `ဒီနေ့ ကျန်: ${Math.max(0, config.imagineDailyLimit - db.getImagineUsage(tgId))} / ${config.imagineDailyLimit} ပုံ`;
+    const prompt = ctx.message.text.replace(/^\/imagine(@\w+)?\s+/, '').trim();
     if (!prompt) {
       return ctx.reply(
         '🎨 **AI ပုံထုတ်ရန်**\n\n' +
         'အသုံးပြုပုံ: `/imagine <ဖော်ပြချက်>`\n' +
-        'ဥပမာ: `/imagine ရွှေတိဂုံစေတီ နေဝင်ချိန်`\n' +
-        'gpt-image-2 နဲ့ထုတ်ချင်ရင်: `/imagine gpt ရွှေတိဂုံစေတီ`\n\n' +
-        usageLine
+        'ဥပမာ: `/imagine ရွှေတိဂုံစေတီ နေဝင်ချိန်`\n\n' +
+        `ဒီနေ့ ကျန်: ${Math.max(0, config.imagineDailyLimit - db.getImagineUsage(tgId))} / ${config.imagineDailyLimit} ပုံ`
       );
     }
-    // Optional model prefix: "/imagine gpt <prompt>" → gpt-image-2 (Relay 2),
-    // otherwise the default Grok model (Relay 1).
-    let wantGpt = false;
-    const mm = prompt.match(/^(gpt|grok)[\s:：]+/i);
-    if (mm) {
-      wantGpt = mm[1].toLowerCase() === 'gpt';
-      prompt = prompt.slice(mm[0].length).trim();
-    }
-    if (!prompt) {
-      return ctx.reply('🎨 ဖော်ပြချက် ထည့်ပါ။ ဥပမာ: `/imagine gpt ရွှေတိဂုံစေတီ နေဝင်ချိန်`\n\n' + usageLine);
-    }
+    if (!imagine.configured() && isOwner(tgId)) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
     // Policy: image generation needs the user's OWN approved-relay API key
-    // (via /setapi with one of the approved relay endpoints). The owner may
-    // use the server relay keys (Relay 1 Grok / Relay 2 RelayModels).
-    let creds = null;
+    // (via /setapi with the sapi.zly168.cn/v1 endpoint). The owner may use
+    // the server relay key.
+    let apiKey = null;
     if (isOwner(tgId)) {
-      creds = imagine.ownerRelay(wantGpt ? 'gpt-image-2' : '');
-      if (!creds) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
+      apiKey = config.imagineKey;
     } else {
-      const u = imagine.userRelay(tgId);
-      if (!u) {
+      apiKey = imagine.userRelayKey(tgId);
+      if (!apiKey) {
         return ctx.reply(
-          '🎨 ပုံထုတ်ဖို့ relay API key ကို /setapi နဲ့ အရင်ထည့်ပေးပါ (private chat မှာ):\n\n' +
-          '`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>` — Grok ပုံထုတ်ရန်\n' +
-          '`/setapi https://api.relaymodels.com/v1 <API_KEY> gpt-image-2` — GPT ပုံထုတ်ရန်\n\n' +
+          '🎨 ပုံထုတ်ဖို့ **sapi.zly168.cn/v1** relay ရဲ့ API key ကို /setapi နဲ့ အရင်ထည့်ပေးပါ (private chat မှာ):\n\n' +
+          '`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>`\n\n' +
           'Relay API မထည့်ထားရင် ပုံထုတ်ခွင့်မရှိပါဘူး 🙏'
         );
       }
-      if (wantGpt && u.base !== imagine.RELAY_2) {
-        return ctx.reply('🎨 gpt-image-2 က RelayModels relay key နဲ့မှ ရမယ် — `/setapi https://api.relaymodels.com/v1 <API_KEY> gpt-image-2` နဲ့ ချိတ်ထားဖို့လိုတယ်။');
-      }
-      creds = { apiKey: u.key, base: u.base, model: wantGpt ? 'gpt-image-2' : imagine.defaultModel(u.base) };
     }
     if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
       return ctx.reply(`⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`);
     }
     try { await ctx.sendChatAction('upload_photo'); } catch (e) {}
     const working = await ctx.reply('🎨 ပုံထုတ်နေတယ်… ခဏစောင့်').catch(() => null);
-    const r = await imagine.generateImage(prompt, { tgId, apiKey: creds.apiKey, base: creds.base, model: creds.model });
+    const r = await imagine.generateImage(prompt, { tgId, apiKey });
     if (working) { try { await ctx.telegram.deleteMessage(ctx.chat.id, working.message_id); } catch (e) {} }
     if (r.error) return ctx.reply('❌ ' + imagine.errorText(r.error, r.detail));
     db.bumpImagineUsage(tgId);
