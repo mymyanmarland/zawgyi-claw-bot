@@ -58,32 +58,105 @@ function createOutboxFile(tgId, filename, content) {
   return { path: full, name: finalName, bytes: Buffer.byteLength(text, 'utf8') };
 }
 
-// --- web_search via DuckDuckGo html (free, no key) ---
+const { validateBaseUrl } = require('./ssrf');
+
+// --- web_search: DuckDuckGo HTML via the www subdomain ---
+// NOTE: html.duckduckgo.com serves this server's IP a bot-check page (HTTP 202,
+// "anomaly-modal"), while duckduckgo.com/html/ returns real results. Do not switch back.
+const SEARCH_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+const MAX_SEARCH_RESULTS = 8;
+
+function decodeEntities(s) {
+  return (s || '')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function unwrapDdg(href) {
+  // DDG wraps result links: //duckduckgo.com/l/?uddg=<encoded> or /l/?uddg=<encoded>
+  const w = href.match(/(?:^|\/)l\/\?uddg=([^&]+)/);
+  if (w) { try { return decodeURIComponent(w[1]); } catch { /* keep original */ } }
+  return href;
+}
+
 async function webSearch(query) {
-  const url = 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query);
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error('search failed: ' + res.status);
-  const html = await res.text();
+  const q = (query || '').trim();
+  if (!q) return '❌ ရှာမယ့် စကားလုံး မပါဘူး။';
+  const url = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(q);
+  let html;
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': SEARCH_UA },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) throw new Error('search failed: ' + res.status);
+    html = await res.text();
+  } catch (e) {
+    return '❌ ရှာဖွေမှု ချိတ်ဆက်မရပါ။ ခဏနေမှ ထပ်စမ်းပါ။';
+  }
+  if (/anomaly-modal/i.test(html)) return '❌ ရှာဖွေမှု ယာယီပိတ်ထားခံရတယ်။ ခဏနေမှ ထပ်စမ်းပါ။';
   const results = [];
   const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
   let m;
-  while ((m = re.exec(html)) && results.length < 5) {
-    const href = m[1].replace(/&amp;/g, '&');
-    const title = m[2].replace(/<[^>]+>/g, '').trim().slice(0, 120);
-    results.push({ title, url: href });
+  while ((m = re.exec(html)) && results.length < MAX_SEARCH_RESULTS) {
+    const href = unwrapDdg(m[1].replace(/&amp;/g, '&'));
+    const title = decodeEntities(m[2]).slice(0, 150);
+    if (/^https?:\/\//i.test(href) && title) results.push({ title, url: href });
   }
-  const snip = [];
   const re2 = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
   let i = 0;
   while ((m = re2.exec(html)) && i < results.length) {
-    results[i].snippet = m[1].replace(/<[^>]+>/g, '').trim().slice(0, 200);
+    results[i].snippet = decodeEntities(m[1]).slice(0, 250);
     i++;
   }
-  if (!results.length) return 'ရှာမတွေ့ပါ။';
+  if (!results.length) return 'ရှာမတွေ့ပါ။ (စကားလုံးပြောင်းပြီး ထပ်စမ်းကြည့်ပါ)';
   return results.map((r, n) => `${n + 1}. ${r.title}\n   ${r.snippet || ''}\n   ${r.url}`).join('\n\n');
+}
+
+// --- open_link: fetch a search result page as readable text ---
+const MAX_PAGE_BYTES = 300 * 1024;
+const MAX_PAGE_TEXT = 6000;
+
+function htmlToText(html) {
+  let t = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ');
+  const title = (t.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || ['', ''])[1].trim();
+  t = t.replace(/<[^>]+>/g, ' ');
+  t = decodeEntities(t).replace(/\s+/g, ' ').trim();
+  return { title: title ? decodeEntities(title).slice(0, 150) : '', text: t };
+}
+
+async function openLink(rawUrl) {
+  const u = (rawUrl || '').trim();
+  if (!u) return '❌ link မပါဘူး။';
+  const err = await validateBaseUrl(u);
+  if (err) return '❌ ' + err;
+  try {
+    const res = await fetch(u, {
+      headers: { 'User-Agent': SEARCH_UA, 'Accept': 'text/html,application/xhtml+xml' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!res.ok) return `❌ စာမျက်နှာ ဖွင့်မရပါ (HTTP ${res.status})။`;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!/text\/html|application\/xhtml/.test(ct)) {
+      return `❌ HTML စာမျက်နှာ မဟုတ်ပါ (${ct || 'unknown type'})။`;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const html = buf.slice(0, MAX_PAGE_BYTES).toString('utf8');
+    const { title, text } = htmlToText(html);
+    if (!text) return '❌ စာမျက်နှာမှာ ဖတ်စရာ စာသား မတွေ့ပါ။';
+    const clipped = text.length > MAX_PAGE_TEXT ? text.slice(0, MAX_PAGE_TEXT) + '…' : text;
+    return (title ? `📄 ${title}\n` : '') + clipped;
+  } catch (e) {
+    return '❌ စာမျက်နှာ ဖွင့်မရပါ: ' + (e.name === 'TimeoutError' ? 'အချိန်ကုန်' : e.message);
+  }
 }
 
 function getTime() {
@@ -99,11 +172,23 @@ const toolDefs = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Search the web for current/news information. Use when the user asks about recent events, prices, weather, or anything you might not know.',
+      description: 'Search the web for current/news information. Returns up to 8 results with title, snippet and URL. Use when the user asks about recent events, prices, weather, links, or anything you might not know. If results are thin, retry with different query wording.',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string', description: 'Search query' } },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'open_link',
+      description: 'Open a URL from web_search results and read its page content as text (up to ~6000 characters). Use to get real details from the most promising 2-3 search results before answering. Only http(s) public pages; internal/private addresses are blocked.',
+      parameters: {
+        type: 'object',
+        properties: { url: { type: 'string', description: 'Full http(s) URL to open' } },
+        required: ['url'],
       },
     },
   },
@@ -194,6 +279,7 @@ const toolDefs = [
 async function runTool(name, args, tgId) {
   try {
     if (name === 'web_search') return await webSearch(args.query || '');
+    if (name === 'open_link') return await openLink(args.url || '');
     if (name === 'get_time') return getTime();
     if (name === 'remember_fact') {
       const id = db.addMemory(tgId, args.fact || '');
