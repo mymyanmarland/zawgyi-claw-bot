@@ -28,6 +28,6 @@ module.exports = {
   // AI image generation via relay (grok-imagine-image). Owner's key, per-user daily cap.
   imagineKey: process.env.RELAY_IMAGE_KEY || '',
   imagineBase: process.env.RELAY_IMAGE_BASE || 'https://sapi.zly168.cn/v1',
-  imagineModel: process.env.RELAY_IMAGE_MODEL || 'grok-imagine-image',
+  imagineModel: process.env.RELAY_IMAGE_MODEL || 'grok-imagine-image-2.0',
   imagineDailyLimit: parseInt(process.env.IMAGINE_DAILY_LIMIT || '10', 10),
 };
