@@ -360,7 +360,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
         );
       }
     }
-    if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
+    if (db.getImagineUsage(tgId) >= config.imagineDailyLimit && !isOwner(tgId)) {
       return ctx.reply(`⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`);
     }
     try { await ctx.sendChatAction('upload_photo'); } catch (e) {}
@@ -525,7 +525,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     db.upsertUser(tgId, u.username, u.first_name);
 
     const used = db.getUsage(tgId);
-    if (used >= config.dailyLimit) {
+    if (used >= config.dailyLimit && !isOwner(tgId)) {
       return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
     }
 
@@ -588,7 +588,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     const tgId = String(ctx.from.id);
     if (!addressedInGroup(ctx)) return;
     if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
-    if (db.getUsage(tgId) >= config.dailyLimit) {
+    if (db.getUsage(tgId) >= config.dailyLimit && !isOwner(tgId)) {
       return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
     }
     const caption = (ctx.message.caption || '').trim() || 'ဒီပုံကို ကြည့်ပေးပါ 🙏';
@@ -617,7 +617,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     const tgId = String(ctx.from.id);
     if (!addressedInGroup(ctx)) return;
     if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
-    if (db.getUsage(tgId) >= config.dailyLimit) {
+    if (db.getUsage(tgId) >= config.dailyLimit && !isOwner(tgId)) {
       return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
     }
     if (!supportedExt(doc.file_name)) {
@@ -660,7 +660,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     const tgId = String(ctx.from.id);
     if (!addressedInGroup(ctx)) return;
     if (!db.getApiConfig(tgId)) return replyLong(ctx, NOAPI_MSG);
-    if (db.getUsage(tgId) >= config.dailyLimit) {
+    if (db.getUsage(tgId) >= config.dailyLimit && !isOwner(tgId)) {
       return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
     }
     if (!whisperAvailable()) {

@@ -431,7 +431,7 @@ async function runTool(name, args, tgId) {
           return '🎨 ဒီအသုံးပြုသူ ပုံထုတ်ခွင့်မရှိသေးဘူး — /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key အရင်ထည့်ဖို့ ပြောပြပါ: `/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။';
         }
       }
-      if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
+      if (db.getImagineUsage(tgId) >= config.imagineDailyLimit && !owner) {
         return `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`;
       }
       const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId, apiKey });
