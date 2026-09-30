@@ -87,18 +87,43 @@ async function generateImage(prompt, opts = {}) {
   }
 }
 
+function translateRelayDetail(detail) {
+  // Relay errors often come back in Chinese — translate the common ones.
+  let d = String(detail || '');
+  const phrases = [
+    [/上游服务暂不可用/g, 'upstream ဝန်ဆောင်မှု ခဏမရနိုင်'],
+    [/余额不足/g, 'balance မလုံလောက်'],
+    [/无效.{0,4}key|key.{0,4}无效/i, 'key မမှန်'],
+    [/请求过快|频率限制/g, 'request များလွန်း'],
+    [/模型不存在|不支持/g, 'model မရနိုင်'],
+  ];
+  for (const [re, my] of phrases) d = d.replace(re, my);
+  return d.slice(0, 200);
+}
+
 function errorText(code, detail) {
+  const d = translateRelayDetail(detail);
   switch (code) {
     case 'empty_prompt': return 'ပုံအတွက် ဖော်ပြချက် (prompt) မပါဘူး။';
     case 'not_configured': return 'ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server မှာ relay key မရှိသေးဘူး)။';
     case 'no_image': return 'relay က ပုံ ပြန်မပေးဘူး။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
     case 'timeout': return 'ပုံထုတ်တာ ကြာလွန်းလို့ ရပ်လိုက်ရတယ်။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
-    case 'fetch_failed': return 'relay ဆာဗာကို ချိတ်မရဘူး' + (detail ? `: ${detail}` : '') + '။';
+    case 'fetch_failed': return 'relay ဆာဗာကို ချိတ်မရဘူး' + (d ? `: ${d}` : '') + '။';
     case 'download_failed': return 'ပုံကို ဒေါင်းလုဒ်ဆွဲမရဘူး။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
     case 'bad_file': return 'ရလာတဲ့ပုံ ဖိုင်မမှန်ဘူး။ ထပ်စမ်းကြည့်ပါ။';
     default:
       if (String(code).startsWith('relay_')) {
-        return `relay error (HTTP ${String(code).slice(6)})` + (detail ? `: ${detail}` : '') + ' — key/balance စစ်ကြည့်ဖို့ လိုနိုင်တယ်။';
+        const http = String(code).slice(6);
+        if (http === '401') return 'relay key မမှန်ဘူး (သက်တမ်းကုန်နေနိုင်) — server ပြင်ဆင်မှု စစ်ဖို့လိုတယ်။';
+        if (http === '402' || http === '403') return 'relay balance ကုန်နေနိုင် / ခွင့်ပြုချက်မရှိဘူး' + (d ? `: ${d}` : '') + '။';
+        if (http === '429') return 'ခဏတာ request များနေတယ် — ခနစောင့်ပြီး ထပ်စမ်းကြည့်ပါ။';
+        if (['500', '502', '503', '504'].includes(http)) {
+          if (/upstream/i.test(d)) {
+            return 'relay ဘက်က ပုံထုတ်ဝန်ဆောင်မှု ခဏရပ်နေတယ် — မင်းဘက်က အမှားမဟုတ်ဘူး။ မိနစ်အနည်းငယ်စောင့်ပြီး ထပ်စမ်းကြည့်ပါ 🙏';
+          }
+          return `relay server ခဏအမှားရှိနေတယ် (HTTP ${http}) — ခဏနေမှ ထပ်စမ်းကြည့်ပါ။`;
+        }
+        return `relay error (HTTP ${http})` + (d ? `: ${d}` : '') + '။';
       }
       return 'ပုံထုတ်မရဘူး 😅 ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
   }
