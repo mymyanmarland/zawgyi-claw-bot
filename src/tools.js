@@ -418,11 +418,23 @@ async function runTool(name, args, tgId) {
     }
     if (name === 'generate_image') {
       const imagine = require('./imagine');
-      if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
+      const owner = config.ownerId && String(tgId) === String(config.ownerId);
+      // Policy: needs the user's OWN approved-relay API key (via /setapi).
+      // The owner may use the server relay key.
+      let apiKey = null;
+      if (owner) {
+        if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
+        apiKey = config.imagineKey;
+      } else {
+        apiKey = imagine.userRelayKey(tgId);
+        if (!apiKey) {
+          return '🎨 ဒီအသုံးပြုသူ ပုံထုတ်ခွင့်မရှိသေးဘူး — /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key အရင်ထည့်ဖို့ ပြောပြပါ: `/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။';
+        }
+      }
       if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
         return `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`;
       }
-      const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId });
+      const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId, apiKey });
       if (r.error) return '❌ ' + imagine.errorText(r.error, r.detail);
       db.bumpImagineUsage(tgId);
       return {

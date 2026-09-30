@@ -28,6 +28,27 @@ function configured() {
   return !!(config.imagineKey && relayBase());
 }
 
+// Normalize + check a base URL against the approved relay.
+function approvedBase(baseUrl) {
+  return String(baseUrl || '').trim().replace(/\/+$/, '').toLowerCase() === APPROVED_RELAY;
+}
+
+// The Telegram user's OWN relay API key (from /setapi), usable for image
+// generation only when their configured endpoint is the approved relay.
+// Returns the decrypted key, or null.
+function userRelayKey(tgId) {
+  try {
+    const db = require('./db');
+    const { decrypt } = require('./crypto');
+    const cfg = db.getApiConfig(String(tgId));
+    if (!cfg || !approvedBase(cfg.base_url)) return null;
+    const key = decrypt(cfg.api_key_enc, config.masterKey);
+    return key || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function imagineDir(tgId) {
   const d = path.join(config.dataDir, 'imagine', String(tgId || 'shared').replace(/[^0-9a-z]/gi, ''));
   fs.mkdirSync(d, { recursive: true });
@@ -38,7 +59,8 @@ async function generateImage(prompt, opts = {}) {
   const p = String(prompt || '').trim().slice(0, 1000);
   if (!p) return { error: 'empty_prompt' };
   const base = relayBase();
-  if (!config.imagineKey || !base) return { error: 'not_configured' };
+  const apiKey = opts.apiKey || config.imagineKey;
+  if (!apiKey || !base) return { error: 'not_configured' };
   const model = opts.model || config.imagineModel;
   const size = SIZE_MAP[opts.aspect] || SIZE_MAP.square;
 
@@ -47,7 +69,7 @@ async function generateImage(prompt, opts = {}) {
     const r = await fetch(base + '/images/generations', {
       method: 'POST',
       headers: {
-        Authorization: 'Bearer ' + config.imagineKey,
+        Authorization: 'Bearer ' + apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ model, prompt: p, size }),
@@ -142,4 +164,4 @@ function errorText(code, detail) {
   }
 }
 
-module.exports = { generateImage, configured, errorText, SIZE_MAP };
+module.exports = { generateImage, configured, errorText, SIZE_MAP, approvedBase, userRelayKey, APPROVED_RELAY };

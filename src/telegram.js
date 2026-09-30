@@ -143,7 +143,7 @@ function createBot() {
       `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်\n` +
       `🔁 /cron <expression> <စာ> — ထပ်တလဲလဲ သတိပေးချက်\n` +
       `📰 /briefing <expression> <အကြောင်း> — AI သတင်းအကျဉ်း\n` +
-      `🎨 /imagine <ဖော်ပြချက်> — AI ပုံထုတ်ရန်\n` +
+      `🎨 /imagine <ဖော်ပြချက်> — AI ပုံထုတ်ရန် (/setapi မှာ relay API ထည့်ထားသူသာ)\n` +
       `📋 /crons — cron/briefing များ ကြည့်ရန်\n` +
       `🗑 /uncron <id> — cron ဖျက်ရန်\n` +
       `📤 /export — စကားဝိုင်း မှတ်တမ်း ထုတ်ယူရန်\n` +
@@ -343,13 +343,29 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
         `ဒီနေ့ ကျန်: ${Math.max(0, config.imagineDailyLimit - db.getImagineUsage(tgId))} / ${config.imagineDailyLimit} ပုံ`
       );
     }
-    if (!imagine.configured()) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
+    if (!imagine.configured() && isOwner(tgId)) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
+    // Policy: image generation needs the user's OWN approved-relay API key
+    // (via /setapi with the sapi.zly168.cn/v1 endpoint). The owner may use
+    // the server relay key.
+    let apiKey = null;
+    if (isOwner(tgId)) {
+      apiKey = config.imagineKey;
+    } else {
+      apiKey = imagine.userRelayKey(tgId);
+      if (!apiKey) {
+        return ctx.reply(
+          '🎨 ပုံထုတ်ဖို့ **sapi.zly168.cn/v1** relay ရဲ့ API key ကို /setapi နဲ့ အရင်ထည့်ပေးပါ (private chat မှာ):\n\n' +
+          '`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>`\n\n' +
+          'Relay API မထည့်ထားရင် ပုံထုတ်ခွင့်မရှိပါဘူး 🙏'
+        );
+      }
+    }
     if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
       return ctx.reply(`⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`);
     }
     try { await ctx.sendChatAction('upload_photo'); } catch (e) {}
     const working = await ctx.reply('🎨 ပုံထုတ်နေတယ်… ခဏစောင့်').catch(() => null);
-    const r = await imagine.generateImage(prompt, { tgId });
+    const r = await imagine.generateImage(prompt, { tgId, apiKey });
     if (working) { try { await ctx.telegram.deleteMessage(ctx.chat.id, working.message_id); } catch (e) {} }
     if (r.error) return ctx.reply('❌ ' + imagine.errorText(r.error, r.detail));
     db.bumpImagineUsage(tgId);
