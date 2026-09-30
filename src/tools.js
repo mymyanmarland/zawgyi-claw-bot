@@ -421,7 +421,7 @@ async function runTool(name, args, tgId) {
       const owner = config.ownerId && String(tgId) === String(config.ownerId);
       // Imagine tiers: owner → server key, unlimited; user with OWN approved-relay
       // key (/setapi sapi.zly168.cn/v1) → their key, 10/day; everyone else → free
-      // tier on the server key, 5/day.
+      // trial on the server key, 5 images LIFETIME.
       const userKey = owner ? null : imagine.userRelayKey(tgId);
       let apiKey;
       if (owner) {
@@ -433,15 +433,20 @@ async function runTool(name, args, tgId) {
         if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
         apiKey = config.imagineKey;
       }
-      const imgLimit = owner ? Infinity : (userKey ? config.imagineDailyLimit : config.freeImagineLimit);
-      if (!owner && db.getImagineUsage(tgId) >= imgLimit) {
-        return userKey
-          ? `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${imgLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`
-          : `⏳ ဒီနေ့ အခမဲ့ ပုံထုတ် limit (${imgLimit}) ပြည့်သွားပြီ 🙏 — ဆက်ထုတ်ချင်ရင် /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key ထည့်ဖို့ အသုံးပြုသူကို ပြောပြပါ: \`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>\` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။`;
+      const freeTrial = !owner && !userKey;
+      if (!owner) {
+        if (userKey) {
+          if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
+            return `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`;
+          }
+        } else if (db.getFreeImgUsed(tgId) >= config.freeImagineLimit) {
+          return `🎁 အခမဲ့ စမ်းသုံးခွင့် (${config.freeImagineLimit} ပုံ) ကုန်သွားပြီ 🙏 — ဆက်ထုတ်ချင်ရင် /setapi မှာ sapi.zly168.cn/v1 relay ရဲ့ API key ထည့်ဖို့ အသုံးပြုသူကို ပြောပြပါ: \`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>\` (private chat မှာ သုံးရမယ်)။ တခြားနည်းနဲ့ ပုံထုတ်မပေးနဲ့။`;
+        }
       }
       const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId, apiKey });
       if (r.error) return '❌ ' + imagine.errorText(r.error, r.detail);
       db.bumpImagineUsage(tgId);
+      if (freeTrial) db.bumpFreeImg(tgId);
       return {
         text: '🎨 ပုံထုတ်ပြီးပြီ — အသုံးပြုသူကို photo အဖြစ် ပို့ပေးမယ်။',
         attachment: { path: r.path, name: r.name, photo: true },

@@ -115,9 +115,9 @@ function createBot() {
       `မင်းရဲ့ ကိုယ်ပိုင် AI လက်ထောက် — မြန်မာလိုပြောမယ်၊ မှတ်ဉာဏ်ရှိတယ်၊ ` +
       `အင်တာနက်ရှာပေးနိုင်တယ်၊ သတိပေးချက်ထားပေးနိုင်တယ်၊ ပုံထုတ်ပေးနိုင်တယ်။\n\n` +
       `🎁 **အခမဲ့ စမ်းသုံးလို့ရတယ်:**\n` +
-      `💬 စကားပြော ${config.freeChatLimit} စောင်/နေ့\n` +
-      `🎨 ပုံထုတ် ${config.freeImagineLimit} ပုံ/နေ့\n\n` +
-      `limit ပြည့်သွားရင် /setapi နဲ့ ကိုယ့် API key ထည့်ပြီး ဆက်သုံးလို့ရတယ် 🔌\n\n` +
+      `💬 စကားပြော ${config.freeChatLimit} စောင် (တစ်ခါသုံး)\n` +
+      `🎨 ပုံထုတ် ${config.freeImagineLimit} ပုံ (တစ်ခါသုံး)\n\n` +
+      `စမ်းသုံးခွင့် ကုန်သွားရင် /setapi နဲ့ ကိုယ့် API key ထည့်ပြီး ဆက်သုံးလို့ရတယ် 🔌\n\n` +
       `/help နဲ့ command အားလုံးကြည့်နိုင်တယ်။`
     );
   });
@@ -130,7 +130,7 @@ function createBot() {
       `🔍 /myapi — ချိတ်ထားတာ ကြည့်ရန်\n` +
       `🗑 /removeapi — API ဖျက်ရန်\n\n` +
       `💬 စာပို့လိုက်ရုံနဲ့ စကားပြောလို့ရတယ် (စာလုံးတစ်လုံးချင်း ပေါ်လာမယ် ✨)\n` +
-      `🎁 အခမဲ့: စကားပြော 50/နေ့ + ပုံထုတ် 5/နေ့ — limit ပြည့်ရင် /setapi နဲ့ ကိုယ့် key ထည့်ပြီး ဆက်သုံးပါ\n` +
+      `🎁 အခမဲ့ စမ်းသုံးခွင့်: စကားပြော 50 + ပုံထုတ် 5 (တစ်ခါသုံး) — ကုန်သွားရင် /setapi နဲ့ ကိုယ့် key ထည့်ပြီး ဆက်သုံးပါ\n` +
       `🖼 ပုံပို့လိုက်ရင် ပုံကို ကြည့်ပြီး ဖြေပေးနိုင်တယ်\n` +
       `📄 PDF / Word / text ဖိုင်ပို့ရင် ဖတ်ပြီး ရှင်းပြပေးတယ်\n` +
       `🎙️ voice message ပို့ရင် နားထောင်ပြီး ဖြေပေးတယ်\n` +
@@ -144,7 +144,7 @@ function createBot() {
       `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်\n` +
       `🔁 /cron <expression> <စာ> — ထပ်တလဲလဲ သတိပေးချက်\n` +
       `📰 /briefing <expression> <အကြောင်း> — AI သတင်းအကျဉ်း\n` +
-      `🎨 /imagine <ဖော်ပြချက်> — AI ပုံထုတ်ရန် (အခမဲ့ ${config.freeImagineLimit} ပုံ/နေ့)\n` +
+      `🎨 /imagine <ဖော်ပြချက်> — AI ပုံထုတ်ရန် (အခမဲ့ ${config.freeImagineLimit} ပုံ တစ်ခါသုံး)\n` +
       `📋 /crons — cron/briefing များ ကြည့်ရန်\n` +
       `🗑 /uncron <id> — cron ဖျက်ရန်\n` +
       `📤 /export — စကားဝိုင်း မှတ်တမ်း ထုတ်ယူရန်\n` +
@@ -338,19 +338,21 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     const prompt = ctx.message.text.replace(/^\/imagine(@\w+)?\s+/, '').trim();
     // Imagine tiers: owner → server key, unlimited; user with OWN approved-relay
     // key (/setapi sapi.zly168.cn/v1) → their key, 10/day; everyone else → free
-    // tier on the server key, 5/day.
+    // trial on the server key, 5 images LIFETIME.
     const imgOwner = isOwner(tgId);
     const userKey = imgOwner ? null : imagine.userRelayKey(tgId);
-    const imgLimit = imgOwner ? Infinity : (userKey ? config.imagineDailyLimit : config.freeImagineLimit);
+    const freeTrial = !imgOwner && !userKey;
     if (!prompt) {
-      const left = imgOwner ? 'အကန့်အသတ်မရှိ ✨'
-        : `${Math.max(0, imgLimit - db.getImagineUsage(tgId))} / ${imgLimit} ပုံ`;
+      let left;
+      if (imgOwner) left = 'အကန့်အသတ်မရှိ ✨';
+      else if (userKey) left = `${Math.max(0, config.imagineDailyLimit - db.getImagineUsage(tgId))} / ${config.imagineDailyLimit} ပုံ (ဒီနေ့)`;
+      else left = `${Math.max(0, config.freeImagineLimit - db.getFreeImgUsed(tgId))} / ${config.freeImagineLimit} ပုံ (အခမဲ့ စမ်းသုံးခွင့်)`;
       return ctx.reply(
         '🎨 **AI ပုံထုတ်ရန်**\n\n' +
         'အသုံးပြုပုံ: `/imagine <ဖော်ပြချက်>`\n' +
         'ဥပမာ: `/imagine ရွှေတိဂုံစေတီ နေဝင်ချိန်`\n\n' +
-        `ဒီနေ့ ကျန်: ${left}` +
-        ((!imgOwner && !userKey) ? `\n\n💡 အခမဲ့ ${config.freeImagineLimit} ပုံ/နေ့ သုံးလို့ရတယ်။ limit ပြည့်ရင် /setapi နဲ့ ကိုယ့် relay key ထည့်ပြီး ဆက်ထုတ်လို့ရတယ် 🙏` : '')
+        `ကျန်: ${left}` +
+        (freeTrial ? `\n\n💡 စမ်းသုံးခွင့် ကုန်သွားရင် /setapi နဲ့ ကိုယ့် relay key ထည့်ပြီး ဆက်ထုတ်လို့ရတယ် 🙏` : '')
       );
     }
     if (imgOwner && !imagine.configured()) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
@@ -363,10 +365,15 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
       if (!imagine.configured()) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
       apiKey = config.imagineKey;
     }
-    if (!imgOwner && db.getImagineUsage(tgId) >= imgLimit) {
-      return ctx.reply(userKey
-        ? `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${imgLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`
-        : `⏳ ဒီနေ့ အခမဲ့ ပုံထုတ် limit (${imgLimit}) ပြည့်သွားပြီ 🙏\n\nဆက်ထုတ်ချင်ရင် **sapi.zly168.cn/v1** relay ရဲ့ API key ကို /setapi နဲ့ ထည့်ပေးပါ (private chat မှာ):\n\n\`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>\``);
+    if (!imgOwner) {
+      if (userKey) {
+        if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
+          return ctx.reply(`⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`);
+        }
+      } else if (db.getFreeImgUsed(tgId) >= config.freeImagineLimit) {
+        // Free trial: 5 images LIFETIME. Exhausted → need own relay key.
+        return ctx.reply(`🎁 အခမဲ့ စမ်းသုံးခွင့် (${config.freeImagineLimit} ပုံ) ကုန်သွားပြီ 🙏\n\nဆက်ထုတ်ချင်ရင် **sapi.zly168.cn/v1** relay ရဲ့ API key ကို /setapi နဲ့ ထည့်ပေးပါ (private chat မှာ):\n\n\`/setapi https://sapi.zly168.cn/v1 <API_KEY> <model>\``);
+      }
     }
     try { await ctx.sendChatAction('upload_photo'); } catch (e) {}
     const working = await ctx.reply('🎨 ပုံထုတ်နေတယ်… ခဏစောင့်').catch(() => null);
@@ -374,6 +381,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     if (working) { try { await ctx.telegram.deleteMessage(ctx.chat.id, working.message_id); } catch (e) {} }
     if (r.error) return ctx.reply('❌ ' + imagine.errorText(r.error, r.detail));
     db.bumpImagineUsage(tgId);
+    if (freeTrial) db.bumpFreeImg(tgId);
     try {
       await ctx.replyWithPhoto({ source: r.path }, { caption: `🎨 ${prompt.slice(0, 200)}` });
     } catch (e) {
@@ -408,12 +416,24 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     const imgs = db.getImagineUsage(tgId);
     const fmt = (n) => Number(n || 0).toLocaleString('en-US');
     const uOwner = isOwner(tgId);
-    const chatLimit = uOwner ? '∞' : (db.getApiConfig(tgId) ? config.dailyLimit : config.freeChatLimit);
-    const imgLimit = uOwner ? '∞' : (imagine.userRelayKey(tgId) ? config.imagineDailyLimit : config.freeImagineLimit);
+    const hasKey = !!db.getApiConfig(tgId);
+    const hasRelay = !!imagine.userRelayKey(tgId);
+    let chatLine, imgLine;
+    if (uOwner) {
+      chatLine = `💬 Messages: ${msgs} (အကန့်အသတ်မရှိ ✨)`;
+      imgLine = `🎨 Images: ${imgs} (အကန့်အသတ်မရှိ ✨)`;
+    } else {
+      chatLine = hasKey
+        ? `💬 Messages: ${msgs} / ${config.dailyLimit} (ဒီနေ့)`
+        : `💬 အခမဲ့ စမ်းသုံးခွင့်: ${db.getFreeChatUsed(tgId)} / ${config.freeChatLimit}`;
+      imgLine = hasRelay
+        ? `🎨 Images: ${imgs} / ${config.imagineDailyLimit} (ဒီနေ့)`
+        : `🎨 အခမဲ့ စမ်းသုံးခွင့်: ${db.getFreeImgUsed(tgId)} / ${config.freeImagineLimit}`;
+    }
     await ctx.reply(
-      `📊 **ဒီနေ့ အသုံးပြုမှု**\n\n` +
-      `💬 Messages: ${msgs} / ${chatLimit}\n` +
-      `🎨 Images: ${imgs} / ${imgLimit}\n` +
+      `📊 **အသုံးပြုမှု**\n\n` +
+      `${chatLine}\n` +
+      `${imgLine}\n` +
       `🔤 Tokens: ${fmt(t.total_tokens)} (in ${fmt(t.prompt_tokens)} / out ${fmt(t.completion_tokens)})\n` +
       `🤖 Model calls: ${t.calls}`
     );
@@ -536,13 +556,15 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
 
     const used = db.getUsage(tgId);
     if (!isOwner(tgId)) {
-      // Tiered daily limit: own /setapi key → 100/day; free tier (no key) → 50/day.
       const hasKey = !!db.getApiConfig(tgId);
-      const limit = hasKey ? config.dailyLimit : config.freeChatLimit;
-      if (used >= limit) {
-        return ctx.reply(hasKey
-          ? `⏳ ဒီနေ့ limit (${limit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`
-          : `⏳ ဒီနေ့ အခမဲ့ limit (${limit}) ပြည့်သွားပြီ 🙏\n\nဆက်ပြောချင်ရင် ကိုယ့် Model API key ကို /setapi နဲ့ ထည့်ပေးပါ (private chat မှာ):\n\n/setapi <base_url> <api_key> <model>\n\n🔒 API key ကို AES-256 နဲ့ လျှို့ဝှက်သိမ်းထားတယ်`);
+      if (hasKey) {
+        // Own key: 100 chats/day.
+        if (used >= config.dailyLimit) {
+          return ctx.reply(`⏳ ဒီနေ့ limit (${config.dailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန် ပြန်လာပါ 🙏`);
+        }
+      } else if (db.getFreeChatUsed(tgId) >= config.freeChatLimit) {
+        // Free trial: 50 chats LIFETIME (not per-day). Exhausted → need own key.
+        return ctx.reply(`🎁 အခမဲ့ စမ်းသုံးခွင့် (${config.freeChatLimit} စောင်) ကုန်သွားပြီ 🙏\n\nဆက်ပြောချင်ရင် ကိုယ့် Model API key ကို /setapi နဲ့ ထည့်ပေးပါ (private chat မှာ):\n\n/setapi <base_url> <api_key> <model>\n\n🔒 API key ကို AES-256 နဲ့ လျှို့ဝှက်သိမ်းထားတယ်`);
       }
     }
 

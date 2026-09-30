@@ -57,6 +57,12 @@ function init(dataDir) {
       count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (tg_id, day)
     );
+    -- Free-trial quota: LIFETIME (not per-day) counters for keyless users.
+    CREATE TABLE IF NOT EXISTS free_quota (
+      tg_id TEXT PRIMARY KEY,
+      chat_used INTEGER NOT NULL DEFAULT 0,
+      img_used INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE IF NOT EXISTS cron_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tg_id TEXT NOT NULL,
@@ -210,6 +216,24 @@ function getImagineUsage(tgId) {
   return row ? row.count : 0;
 }
 
+// Free-trial lifetime counters (keyless users only).
+function getFreeChatUsed(tgId) {
+  const row = db.prepare('SELECT chat_used FROM free_quota WHERE tg_id = ?').get(tgId);
+  return row ? row.chat_used : 0;
+}
+function getFreeImgUsed(tgId) {
+  const row = db.prepare('SELECT img_used FROM free_quota WHERE tg_id = ?').get(tgId);
+  return row ? row.img_used : 0;
+}
+function bumpFreeChat(tgId) {
+  db.prepare(`INSERT INTO free_quota (tg_id, chat_used, img_used) VALUES (?,?,0)
+              ON CONFLICT(tg_id) DO UPDATE SET chat_used = chat_used + 1`).run(tgId, 1);
+}
+function bumpFreeImg(tgId) {
+  db.prepare(`INSERT INTO free_quota (tg_id, chat_used, img_used) VALUES (?,0,1)
+              ON CONFLICT(tg_id) DO UPDATE SET img_used = img_used + 1`).run(tgId);
+}
+
 function addTokenUsage(tgId, u) {
   if (!u) return;
   const p = u.prompt_tokens || 0, c = u.completion_tokens || 0, t = u.total_tokens || (p + c);
@@ -254,4 +278,5 @@ module.exports = {
   addCronJob, listCronJobs, allCronJobs, deleteCronJob,
   bumpUsage, getUsage, addTokenUsage, getTokenUsage, stats, allUserIds,
   bumpImagineUsage, getImagineUsage,
+  getFreeChatUsed, getFreeImgUsed, bumpFreeChat, bumpFreeImg,
 };

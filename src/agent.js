@@ -238,12 +238,14 @@ function buildChatMessages(dataDir, systemPrompt, history, curText, curPhoto) {
 
 async function chat(tgId, userText, photoFile, onToken) {
   let apiCfg = db.getApiConfig(tgId);
+  let freeTrial = false;
   if (!apiCfg) {
-    // Free tier: users without their own /setapi key chat on the owner's
-    // API config (freeChatLimit/day). briefing()/crons stay key-only.
+    // Free trial: users without their own /setapi key chat on the owner's
+    // API config (freeChatLimit chats lifetime). briefing()/crons stay key-only.
     const ownerCfg = config.ownerId ? db.getApiConfig(String(config.ownerId)) : null;
     if (!ownerCfg) return { error: 'noapi' };
     apiCfg = ownerCfg;
+    freeTrial = true;
   }
 
   db.addMessage(tgId, 'user', userText, photoFile || null);
@@ -298,6 +300,7 @@ async function chat(tgId, userText, photoFile, onToken) {
   // Hindsight: retain this turn's exchange for future recall (fire-and-forget).
   hs.retainTurn(tgId, cur.content, finalText);
   db.bumpUsage(tgId);
+  if (freeTrial) db.bumpFreeChat(tgId);
   db.addTokenUsage(tgId, totalUsage);
   return { text: finalText, files };
 }

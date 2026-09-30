@@ -12,7 +12,9 @@ module.exports = {
   masterKey: required('ZAWGYI_MASTER_KEY', undefined), // 64-hex chars (32 bytes)
   dataDir: process.env.DATA_DIR || './data',
   dailyLimit: parseInt(process.env.DAILY_LIMIT || '100', 10),
-  // Free tier for users WITHOUT their own /setapi key: funded by the owner's key.
+  // Free trial for users WITHOUT their own /setapi key: LIFETIME quotas
+  // (not per-day), funded by the owner's key. Once exhausted, they must
+  // add their own API key via /setapi to continue.
   freeChatLimit: parseInt(process.env.FREE_CHAT_LIMIT || '50', 10),
   freeImagineLimit: parseInt(process.env.FREE_IMAGINE_LIMIT || '5', 10),
   braveSearchKey: process.env.BRAVE_SEARCH_API_KEY || '', // optional: Brave Search API (paid, $5/mo credits) as search backend
