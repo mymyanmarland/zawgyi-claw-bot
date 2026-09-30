@@ -20,4 +20,9 @@ module.exports = {
   // at 127.0.0.1:8888; set HINDSIGHT_ENABLED=1 to turn recall/retain on.
   hindsightUrl: process.env.HINDSIGHT_URL || 'http://127.0.0.1:8888',
   hindsightEnabled: process.env.HINDSIGHT_ENABLED === '1',
+  // AI image generation via relay (grok-imagine-image). Owner's key, per-user daily cap.
+  imagineKey: process.env.RELAY_IMAGE_KEY || '',
+  imagineBase: process.env.RELAY_IMAGE_BASE || 'https://sapi.zly168.cn/v1',
+  imagineModel: process.env.RELAY_IMAGE_MODEL || 'grok-imagine-image',
+  imagineDailyLimit: parseInt(process.env.IMAGINE_DAILY_LIMIT || '10', 10),
 };

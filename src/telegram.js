@@ -9,6 +9,7 @@ const { saveTelegramAudio, transcribeAudio, whisperAvailable } = require('./audi
 const { saveTelegramDocument, extractText, supportedExt } = require('./documents');
 const { validateBaseUrl } = require('./ssrf');
 const { createOutboxFile } = require('./tools');
+const imagine = require('./imagine');
 const config = require('./config');
 const hs = require('./hindsight');
 
@@ -142,6 +143,7 @@ function createBot() {
       `📝 /reminders — သတိပေးချက်များ ကြည့်ရန်\n` +
       `🔁 /cron <expression> <စာ> — ထပ်တလဲလဲ သတိပေးချက်\n` +
       `📰 /briefing <expression> <အကြောင်း> — AI သတင်းအကျဉ်း\n` +
+      `🎨 /imagine <ဖော်ပြချက်> — AI ပုံထုတ်ရန်\n` +
       `📋 /crons — cron/briefing များ ကြည့်ရန်\n` +
       `🗑 /uncron <id> — cron ဖျက်ရန်\n` +
       `📤 /export — စကားဝိုင်း မှတ်တမ်း ထုတ်ယူရန်\n` +
@@ -330,6 +332,35 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     await ctx.reply(`📰 ဖန်တီးပြီးပြီ (id ${r.id}):\n📝 ${topic.trim()}\n🕐 ${cronjobs.humanize(expr)}\n\n/crons နဲ့ ကြည့်နိုင်တယ်။`);
   });
 
+  bot.command('imagine', async (ctx) => {
+    const tgId = String(ctx.from.id);
+    const prompt = ctx.message.text.replace(/^\/imagine(@\w+)?\s+/, '').trim();
+    if (!prompt) {
+      return ctx.reply(
+        '🎨 **AI ပုံထုတ်ရန်**\n\n' +
+        'အသုံးပြုပုံ: `/imagine <ဖော်ပြချက်>`\n' +
+        'ဥပမာ: `/imagine ရွှေတိဂုံစေတီ နေဝင်ချိန်`\n\n' +
+        `ဒီနေ့ ကျန်: ${Math.max(0, config.imagineDailyLimit - db.getImagineUsage(tgId))} / ${config.imagineDailyLimit} ပုံ`
+      );
+    }
+    if (!imagine.configured()) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
+    if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
+      return ctx.reply(`⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`);
+    }
+    try { await ctx.sendChatAction('upload_photo'); } catch (e) {}
+    const working = await ctx.reply('🎨 ပုံထုတ်နေတယ်… ခဏစောင့်').catch(() => null);
+    const r = await imagine.generateImage(prompt, { tgId });
+    if (working) { try { await ctx.telegram.deleteMessage(ctx.chat.id, working.message_id); } catch (e) {} }
+    if (r.error) return ctx.reply('❌ ' + imagine.errorText(r.error, r.detail));
+    db.bumpImagineUsage(tgId);
+    try {
+      await ctx.replyWithPhoto({ source: r.path }, { caption: `🎨 ${prompt.slice(0, 200)}` });
+    } catch (e) {
+      console.error('imagine sendPhoto failed:', e.message);
+      await ctx.reply('😵 ပုံပို့မရဘူး — ခဏနေမှ ထပ်စမ်းကြည့်ပါ။');
+    }
+  });
+
   bot.command('export', async (ctx) => {
     const tgId = String(ctx.from.id);
     const msgs = db.getAllMessages(tgId, 200);
@@ -496,13 +527,17 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
         );
       }
       await renderer.finish(result.text);
-      // agent-created file attachments -> send as Telegram documents
+      // agent-created file attachments -> Telegram documents; photos -> photo messages
       if (result.files && result.files.length) {
         for (const f of result.files) {
           try {
-            await ctx.replyWithDocument({ source: f.path, filename: f.name });
+            if (f.photo) {
+              await ctx.replyWithPhoto({ source: f.path });
+            } else {
+              await ctx.replyWithDocument({ source: f.path, filename: f.name });
+            }
           } catch (e) {
-            console.error('sendDocument failed:', e.message);
+            console.error('sendAttachment failed:', e.message);
             await ctx.reply(`📎 ${f.name} ပို့မရဘူး 😅`).catch(() => {});
           }
         }
@@ -659,6 +694,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     { command: 'reminders', description: 'သတိပေးချက်များ ကြည့်ရန်' },
     { command: 'cron', description: 'ထပ်တလဲလဲ သတိပေးချက် ဖန်တီးရန်' },
     { command: 'briefing', description: 'AI သတင်းအကျဉ်း ဖန်တီးရန်' },
+    { command: 'imagine', description: '🎨 AI ပုံထုတ်ရန် (/imagine <ဖော်ပြချက်>)' },
     { command: 'crons', description: 'cron/briefing စာရင်း ကြည့်ရန်' },
     { command: 'uncron', description: 'cron ဖျက်ရန်' },
     { command: 'export', description: 'စကားဝိုင်း မှတ်တမ်း ထုတ်ယူရန်' },

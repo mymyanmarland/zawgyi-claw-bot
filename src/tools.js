@@ -355,6 +355,21 @@ const toolDefs = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_image',
+      description: 'Generate an AI image from a text prompt and send it to the user as a photo. Use when the user asks for a picture/image ("ပုံထုတ်ပေး", "ပုံဆွဲပေး", "draw...", "image of..."). Write the prompt in English (translate the user\'s Burmese description yourself). Aspect: square (default), portrait, landscape, wide.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'Image description in English, e.g. "Shwedagon Pagoda at sunset, golden light, photorealistic"' },
+          aspect: { type: 'string', description: 'square, portrait, landscape or wide', enum: ['square', 'portrait', 'landscape', 'wide'] },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
 ];
 
 async function runTool(name, args, tgId) {
@@ -399,6 +414,20 @@ async function runTool(name, args, tgId) {
       return {
         text: `📎 file အသင့်ဖြစ်ပြီ: ${r.name} (${kb}KB) — အသုံးပြုသူကို attachment အဖြစ် ပို့ပေးမယ်။`,
         attachment: { path: r.path, name: r.name },
+      };
+    }
+    if (name === 'generate_image') {
+      const imagine = require('./imagine');
+      if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
+      if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {
+        return `⏳ ဒီနေ့ ပုံထုတ်တာ limit (${config.imagineDailyLimit}) ပြည့်သွားပြီ။ မနက်ဖြန်မှ ပြန်လာပါ 🙏`;
+      }
+      const r = await imagine.generateImage(args.prompt, { aspect: args.aspect, tgId });
+      if (r.error) return '❌ ' + imagine.errorText(r.error, r.detail);
+      db.bumpImagineUsage(tgId);
+      return {
+        text: '🎨 ပုံထုတ်ပြီးပြီ — အသုံးပြုသူကို photo အဖြစ် ပို့ပေးမယ်။',
+        attachment: { path: r.path, name: r.name, photo: true },
       };
     }
     return 'unknown tool';

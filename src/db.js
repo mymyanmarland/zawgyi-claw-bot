@@ -51,6 +51,12 @@ function init(dataDir) {
       count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (tg_id, day)
     );
+    CREATE TABLE IF NOT EXISTS imagine_usage (
+      tg_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (tg_id, day)
+    );
     CREATE TABLE IF NOT EXISTS cron_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tg_id TEXT NOT NULL,
@@ -193,6 +199,17 @@ function getUsage(tgId) {
   return row ? row.count : 0;
 }
 
+function bumpImagineUsage(tgId) {
+  const day = todayStr();
+  db.prepare(`INSERT INTO imagine_usage (tg_id, day, count) VALUES (?,?,1)
+              ON CONFLICT(tg_id, day) DO UPDATE SET count = count + 1`).run(tgId, day);
+}
+
+function getImagineUsage(tgId) {
+  const row = db.prepare('SELECT count FROM imagine_usage WHERE tg_id = ? AND day = ?').get(tgId, todayStr());
+  return row ? row.count : 0;
+}
+
 function addTokenUsage(tgId, u) {
   if (!u) return;
   const p = u.prompt_tokens || 0, c = u.completion_tokens || 0, t = u.total_tokens || (p + c);
@@ -236,4 +253,5 @@ module.exports = {
   addReminder, dueReminders, markReminderSent, listReminders,
   addCronJob, listCronJobs, allCronJobs, deleteCronJob,
   bumpUsage, getUsage, addTokenUsage, getTokenUsage, stats, allUserIds,
+  bumpImagineUsage, getImagineUsage,
 };
