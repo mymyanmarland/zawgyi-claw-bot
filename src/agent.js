@@ -33,6 +33,9 @@ function buildSystemPrompt(tgId, hsMemories) {
   const mems = db.listMemories(tgId);
   let p = PERSONA;
   p += `\n\nယနေ့: ${new Date().toLocaleDateString('my-MM', { timeZone: 'Asia/Yangon', dateStyle: 'full' })}`;
+  if (config.ownerId && String(tgId) === String(config.ownerId)) {
+    p += '\n\n⚠️ အရေးကြီး: ဒီ chat မှာ စကားပြောနေသူက မင်းရဲ့ ပိုင်ရှင် 808 Coder ကိုယ်တိုင်ပဲ (Telegram ID ကိုက်ညီမှု အတည်ပြုပြီး)။ "ငါဘယ်သူလဲ" "ငါ့ကို ယုံလား" လို့ မေးရင် သူ 808 Coder ဖြစ်ကြောင်း ယုံကြည်စွာ အသိအမှတ်ပြုဖြေပါ။';
+  }
   if (mems.length) {
     p += '\n\nအသုံးပြုသူ့အကြောင်း မှတ်ထားတာများ:\n' + mems.map(m => `- [${m.id}] ${m.fact}`).join('\n');
   }
