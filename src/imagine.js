@@ -11,8 +11,21 @@ const SIZE_MAP = {
   wide: '1920x1080',
 };
 
+// Policy: image generation is ONLY allowed through the approved relay.
+// Any other endpoint (e.g. via RELAY_IMAGE_BASE override) disables the feature.
+const APPROVED_RELAY = 'https://sapi.zly168.cn/v1';
+
+function relayBase() {
+  const b = String(config.imagineBase || '').trim().replace(/\/+$/, '').toLowerCase();
+  if (b === APPROVED_RELAY) return APPROVED_RELAY;
+  if (config.imagineBase) {
+    console.warn('[imagine] RELAY_IMAGE_BASE is not the approved relay — image generation DISABLED');
+  }
+  return null;
+}
+
 function configured() {
-  return !!(config.imagineKey && config.imagineBase);
+  return !!(config.imagineKey && relayBase());
 }
 
 function imagineDir(tgId) {
@@ -24,10 +37,10 @@ function imagineDir(tgId) {
 async function generateImage(prompt, opts = {}) {
   const p = String(prompt || '').trim().slice(0, 1000);
   if (!p) return { error: 'empty_prompt' };
-  if (!configured()) return { error: 'not_configured' };
+  const base = relayBase();
+  if (!config.imagineKey || !base) return { error: 'not_configured' };
   const model = opts.model || config.imagineModel;
   const size = SIZE_MAP[opts.aspect] || SIZE_MAP.square;
-  const base = config.imagineBase.replace(/\/+$/, '');
 
   let remoteUrl = null;
   try {
@@ -105,7 +118,7 @@ function errorText(code, detail) {
   const d = translateRelayDetail(detail);
   switch (code) {
     case 'empty_prompt': return 'ပုံအတွက် ဖော်ပြချက် (prompt) မပါဘူး။';
-    case 'not_configured': return 'ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server မှာ relay key မရှိသေးဘူး)။';
+    case 'not_configured': return 'ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (ခွင့်ပြုထားတဲ့ relay မှတစ်ဆင့်သာ ပုံထုတ်လို့ရတယ်)။';
     case 'no_image': return 'relay က ပုံ ပြန်မပေးဘူး။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
     case 'timeout': return 'ပုံထုတ်တာ ကြာလွန်းလို့ ရပ်လိုက်ရတယ်။ ခဏနေမှ ထပ်စမ်းကြည့်ပါ။';
     case 'fetch_failed': return 'relay ဆာဗာကို ချိတ်မရဘူး' + (d ? `: ${d}` : '') + '။';
