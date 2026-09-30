@@ -81,22 +81,40 @@ function unwrapDdg(href) {
   return href;
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function ddgHtmlFetch(q) {
+  const url = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(q);
+  const res = await fetch(url, {
+    headers: { 'User-Agent': SEARCH_UA },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error('search failed: ' + res.status);
+  return res.text();
+}
+
 async function webSearch(query) {
   const q = (query || '').trim();
   if (!q) return '❌ ရှာမယ့် စကားလုံး မပါဘူး။';
-  const url = 'https://duckduckgo.com/html/?q=' + encodeURIComponent(q);
-  let html;
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': SEARCH_UA },
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!res.ok) throw new Error('search failed: ' + res.status);
-    html = await res.text();
-  } catch (e) {
-    return '❌ ရှာဖွေမှု ချိတ်ဆက်မရပါ။ ခဏနေမှ ထပ်စမ်းပါ။';
+  // DDG sometimes serves a bot-check page (anomaly-modal) to server IPs.
+  // It is transient — retry with backoff instead of giving up.
+  let html = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      html = await ddgHtmlFetch(q);
+    } catch (e) {
+      html = null;
+      if (attempt < 2) { await sleep(3000 * (attempt + 1)); continue; }
+      return '❌ ရှာဖွေမှု ချိတ်ဆက်မရပါ။ web_search ကို စကားလုံးပြောင်းပြီး ထပ်ခေါ်ကြည့်ပါ။';
+    }
+    if (/anomaly-modal/i.test(html)) {
+      html = null;
+      if (attempt < 2) { await sleep(4000 * (attempt + 1)); continue; }
+      return '❌ ရှာဖွေမှု ခဏတာ အဆင်မပြေပါ (rate limit)။ web_search ကို စကားလုံးပြောင်းပြီး ထပ်ခေါ်ကြည့်ပါ။';
+    }
+    break;
   }
-  if (/anomaly-modal/i.test(html)) return '❌ ရှာဖွေမှု ယာယီပိတ်ထားခံရတယ်။ ခဏနေမှ ထပ်စမ်းပါ။';
+  if (!html) return '❌ ရှာဖွေမှု ခဏတာ အဆင်မပြေပါ။ web_search ကို ထပ်ခေါ်ကြည့်ပါ။';
   const results = [];
   const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
   let m;
@@ -172,7 +190,7 @@ const toolDefs = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Search the web for current/news information. Returns up to 8 results with title, snippet and URL. Use when the user asks about recent events, prices, weather, links, or anything you might not know. If results are thin, retry with different query wording.',
+      description: 'Search the web for current/news information. Returns up to 8 results with title, snippet and URL. Use when the user asks about recent events, prices, weather, links, or anything you might not know. If results are thin, retry with different query wording. If you get a rate-limit/connection error, call web_search again with a reworded query — never tell the user search is unavailable without retrying first.',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string', description: 'Search query' } },
@@ -277,6 +295,7 @@ const toolDefs = [
 ];
 
 async function runTool(name, args, tgId) {
+  console.log(`[tool] ${name} (tg ${tgId})`);
   try {
     if (name === 'web_search') return await webSearch(args.query || '');
     if (name === 'open_link') return await openLink(args.url || '');
