@@ -336,11 +336,14 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
   bot.command('imagine', async (ctx) => {
     const tgId = String(ctx.from.id);
     const prompt = ctx.message.text.replace(/^\/imagine(@\w+)?\s+/, '').trim();
-    // Imagine tiers: owner → server key, unlimited; user with OWN approved-relay
+    // Imagine tiers: owner → unlimited; user with OWN approved-relay
     // key (/setapi sapi.zly168.cn/v1) → their key, 10/day; everyone else → free
     // trial on the server key, 5 images LIFETIME.
+    // Key priority: the user's own approved-relay /setapi key first (this
+    // includes the owner — so a fresh owner key keeps working when the
+    // server key runs out), then the server key.
     const imgOwner = isOwner(tgId);
-    const userKey = imgOwner ? null : imagine.userRelayKey(tgId);
+    const userKey = imagine.userRelayKey(tgId);
     const freeTrial = !imgOwner && !userKey;
     if (!prompt) {
       let left;
@@ -355,16 +358,9 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
         (freeTrial ? `\n\n💡 စမ်းသုံးခွင့် ကုန်သွားရင် /setapi နဲ့ ကိုယ့် relay key ထည့်ပြီး ဆက်ထုတ်လို့ရတယ် 🙏` : '')
       );
     }
-    if (imgOwner && !imagine.configured()) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
-    let apiKey;
-    if (imgOwner) {
-      apiKey = config.imagineKey;
-    } else if (userKey) {
-      apiKey = userKey;
-    } else {
-      if (!imagine.configured()) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
-      apiKey = config.imagineKey;
-    }
+    const serverKey = imagine.configured() ? config.imagineKey : null;
+    const apiKey = userKey || serverKey;
+    if (!apiKey) return ctx.reply('❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။');
     if (!imgOwner) {
       if (userKey) {
         if (db.getImagineUsage(tgId) >= config.imagineDailyLimit) {

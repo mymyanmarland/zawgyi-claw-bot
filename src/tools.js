@@ -419,20 +419,15 @@ async function runTool(name, args, tgId) {
     if (name === 'generate_image') {
       const imagine = require('./imagine');
       const owner = config.ownerId && String(tgId) === String(config.ownerId);
-      // Imagine tiers: owner → server key, unlimited; user with OWN approved-relay
+      // Imagine tiers: owner → unlimited; user with OWN approved-relay
       // key (/setapi sapi.zly168.cn/v1) → their key, 10/day; everyone else → free
       // trial on the server key, 5 images LIFETIME.
-      const userKey = owner ? null : imagine.userRelayKey(tgId);
-      let apiKey;
-      if (owner) {
-        if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
-        apiKey = config.imagineKey;
-      } else if (userKey) {
-        apiKey = userKey;
-      } else {
-        if (!imagine.configured()) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
-        apiKey = config.imagineKey;
-      }
+      // Key priority: the user's own approved-relay /setapi key first (this
+      // includes the owner), then the server key.
+      const userKey = imagine.userRelayKey(tgId);
+      const serverKey = imagine.configured() ? config.imagineKey : null;
+      const apiKey = userKey || serverKey;
+      if (!apiKey) return '❌ ပုံထုတ်စနစ် အဆင်သင့်မဖြစ်သေးဘူး (server ပြင်ဆင်မှု လိုနေတယ်)။';
       const freeTrial = !owner && !userKey;
       if (!owner) {
         if (userKey) {
