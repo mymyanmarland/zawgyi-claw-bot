@@ -1,7 +1,6 @@
 // AI image generation via an OpenAI-compatible relay (grok-imagine-image models).
 // Server-side only: the relay key never leaves the VPS and is never sent to Telegram.
-const fs = require('fs');
-const path = require('path');
+// Images are held in memory only and never written to disk.
 const config = require('./config');
 
 const SIZE_MAP = {
@@ -47,12 +46,6 @@ function userRelayKey(tgId) {
   } catch (e) {
     return null;
   }
-}
-
-function imagineDir(tgId) {
-  const d = path.join(config.dataDir, 'imagine', String(tgId || 'shared').replace(/[^0-9a-z]/gi, ''));
-  fs.mkdirSync(d, { recursive: true });
-  return d;
 }
 
 async function generateImage(prompt, opts = {}) {
@@ -107,11 +100,9 @@ async function generateImage(prompt, opts = {}) {
   }
   if (!remoteUrl) return lastError || { error: 'no_image' };
 
-  // Download to a local file so Telegram can send it as a photo.
+  // Download into memory and send straight to Telegram — never stored on disk.
   try {
-    const dir = imagineDir(opts.tgId);
     const name = 'imagine-' + Date.now() + '.jpg';
-    const full = path.join(dir, name);
     let buf;
     if (remoteUrl.startsWith('data:')) {
       buf = Buffer.from(remoteUrl.split(',')[1] || '', 'base64');
@@ -121,18 +112,7 @@ async function generateImage(prompt, opts = {}) {
       buf = Buffer.from(await r.arrayBuffer());
     }
     if (!buf.length || buf.length > 10 * 1024 * 1024) return { error: 'bad_file' };
-    fs.writeFileSync(full, buf);
-    // prune old images for this user (keep newest 20)
-    try {
-      const files = fs.readdirSync(dir)
-        .filter((f) => f.startsWith('imagine-'))
-        .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.t - a.t);
-      for (const { f } of files.slice(20)) {
-        try { fs.unlinkSync(path.join(dir, f)); } catch (e) {}
-      }
-    } catch (e) {}
-    return { path: full, name, prompt: p };
+    return { buffer: buf, name, prompt: p };
   } catch (e) {
     return { error: 'download_failed', detail: String(e.message).slice(0, 160) };
   }

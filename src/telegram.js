@@ -379,7 +379,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
     db.bumpImagineUsage(tgId);
     if (freeTrial) db.bumpFreeImg(tgId);
     try {
-      await ctx.replyWithPhoto({ source: r.path }, { caption: `🎨 ${prompt.slice(0, 200)}` });
+      await ctx.replyWithPhoto({ source: r.buffer }, { caption: `🎨 ${prompt.slice(0, 200)}` });
     } catch (e) {
       console.error('imagine sendPhoto failed:', e.message);
       await ctx.reply('😵 ပုံပို့မရဘူး — ခဏနေမှ ထပ်စမ်းကြည့်ပါ။');
@@ -583,7 +583,7 @@ AI က web ကနေ နောက်ဆုံးသတင်းတွေ ရှ�
         for (const f of result.files) {
           try {
             if (f.photo) {
-              await ctx.replyWithPhoto({ source: f.path });
+              await ctx.replyWithPhoto({ source: f.buffer });
             } else {
               await ctx.replyWithDocument({ source: f.path, filename: f.name });
             }

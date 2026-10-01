@@ -444,7 +444,7 @@ async function runTool(name, args, tgId) {
       if (freeTrial) db.bumpFreeImg(tgId);
       return {
         text: '🎨 ပုံထုတ်ပြီးပြီ — အသုံးပြုသူကို photo အဖြစ် ပို့ပေးမယ်။',
-        attachment: { path: r.path, name: r.name, photo: true },
+        attachment: { buffer: r.buffer, name: r.name, photo: true },
       };
     }
     return 'unknown tool';
